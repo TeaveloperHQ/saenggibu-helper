@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using ClosedXML.Excel;
 
 namespace Saenggibu;
 
@@ -67,5 +68,60 @@ public static class Importer
             ? BlankLine.Split(text)
             : text.Split('\n');
         return chunks.Select(c => c.Trim()).Where(c => c.Length >= minLen).ToList();
+    }
+
+    private static readonly string[] ContentHdr =
+        { "특기사항", "세부능력", "행동특성", "종합의견", "내용", "기재", "특기", "의견" };
+
+    private static int? HeuristicCol(List<(int i, string header, double avg)> profs)
+    {
+        foreach (var p in profs)
+            if (ContentHdr.Any(k => p.header.Contains(k, StringComparison.Ordinal)))
+                return p.i;
+        var cand = profs.Where(p => p.avg > 0).ToList();
+        if (cand.Count == 0) return null;
+        // Python max(cand, key=avg): 첫 최댓값(동률 시 앞쪽)
+        var best = cand[0];
+        foreach (var p in cand) if (p.avg > best.avg) best = p;
+        return best.i;
+    }
+
+    /// <summary>app/importer.py parse_xlsx — 엑셀에서 생기부 본문 열을 휴리스틱으로 추출.</summary>
+    public static List<string> ParseXlsx(string path, int minLen = 5)
+    {
+        var records = new List<string>();
+        using var wb = new XLWorkbook(path);
+        foreach (var ws in wb.Worksheets)
+        {
+            var used = ws.RangeUsed();
+            if (used == null) continue;
+            var rows = used.Rows().ToList();
+            if (rows.Count < 2) continue;
+            int ncol = rows.Max(r => r.CellCount());
+            // 열 프로파일(헤더 = 첫 행, avg = 2행부터 비어있지 않은 셀 평균 길이)
+            var profs = new List<(int i, string header, double avg)>();
+            for (int c = 0; c < ncol; c++)
+            {
+                string header = c < rows[0].CellCount() ? (rows[0].Cell(c + 1).GetString() ?? "").Trim() : "";
+                var vals = new List<string>();
+                for (int r = 1; r < rows.Count; r++)
+                {
+                    if (c >= rows[r].CellCount()) continue;
+                    string v = (rows[r].Cell(c + 1).GetString() ?? "").Trim();
+                    if (v.Length > 0) vals.Add(v);
+                }
+                double avg = vals.Count > 0 ? vals.Average(v => (double)v.Length) : 0;
+                profs.Add((c, header, avg));
+            }
+            int? col = HeuristicCol(profs);
+            if (col == null) continue;
+            for (int r = 1; r < rows.Count; r++)
+            {
+                if (col.Value >= rows[r].CellCount()) continue;
+                string v = (rows[r].Cell(col.Value + 1).GetString() ?? "").Trim();
+                if (v.Length >= minLen) records.Add(v);
+            }
+        }
+        return records;
     }
 }

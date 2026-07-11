@@ -78,6 +78,14 @@ if (args.Length > 0 && args[0] == "bench")
     return 0;
 }
 
+// 서브커맨드: xlsxtest <path> — parse_xlsx 파리티
+if (args.Length > 0 && args[0] == "xlsxtest")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    foreach (var r in Importer.ParseXlsx(args[1])) Console.WriteLine(r);
+    return 0;
+}
+
 // 서브커맨드: mtest <modelPath> <sent> <n> [subject] — _mechanical 파리티
 if (args.Length > 0 && args[0] == "mtest")
 {
