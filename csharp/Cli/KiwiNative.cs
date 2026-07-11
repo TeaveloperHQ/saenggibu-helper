@@ -34,6 +34,7 @@ public sealed class KiwiNative : IKiwi, IDisposable
     [DllImport(Lib)] private static extern int kiwi_res_word_num(IntPtr res, int index);
     [DllImport(Lib)] private static extern IntPtr kiwi_res_form(IntPtr res, int index, int num);
     [DllImport(Lib)] private static extern IntPtr kiwi_res_tag(IntPtr res, int index, int num);
+    [DllImport(Lib)] private static extern int kiwi_res_position(IntPtr res, int index, int num);
     [DllImport(Lib)] private static extern int kiwi_res_close(IntPtr res);
     [DllImport(Lib)] private static extern int kiwi_close(IntPtr handle);
     [DllImport(Lib)] private static extern IntPtr kiwi_version();
@@ -83,6 +84,30 @@ public sealed class KiwiNative : IKiwi, IDisposable
         }
         finally { kiwi_res_close(res); }
     }
+
+    public IReadOnlyList<(string form, string tag, int start)> TokenizeFull(string text)
+    {
+        IntPtr res = kiwi_analyze(_h, text, 1, MakeOpt(), IntPtr.Zero);
+        if (res == IntPtr.Zero)
+            throw new InvalidOperationException("kiwi_analyze 실패");
+        try
+        {
+            int n = kiwi_res_word_num(res, 0);
+            var outp = new List<(string, string, int)>(n);
+            for (int i = 0; i < n; i++)
+                outp.Add((Marshal.PtrToStringUTF8(kiwi_res_form(res, 0, i)) ?? "",
+                          Marshal.PtrToStringUTF8(kiwi_res_tag(res, 0, i)) ?? "",
+                          kiwi_res_position(res, 0, i)));
+            return outp;
+        }
+        finally { kiwi_res_close(res); }
+    }
+
+    private AnalyzeOption MakeOpt() => new()
+    {
+        match_options = MatchOptions, blocklist = IntPtr.Zero, open_ending = 0,
+        allowed_dialects = 0, dialect_cost = 3.0f, typo_transformer = IntPtr.Zero, typo_threshold = 2.5f,
+    };
 
     public string Join(IReadOnlyList<(string form, string tag)> morphs)
     {

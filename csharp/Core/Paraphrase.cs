@@ -9,6 +9,7 @@ namespace Saenggibu;
 public interface IKiwi
 {
     IReadOnlyList<(string form, string tag)> Tokenize(string text);
+    IReadOnlyList<(string form, string tag, int start)> TokenizeFull(string text);
     string Join(IReadOnlyList<(string form, string tag)> morphs);
 }
 
@@ -241,5 +242,146 @@ public static class Paraphrase
                 }
         }
         return outp.Take(Math.Max(k, 1)).ToList();
+    }
+
+    private static readonly HashSet<string> NounTags = new() { "NNG", "NNP", "NNB", "SN", "SL", "SH", "NR" };
+    private static readonly string[] Masks =
+        { "갑물질", "을물질", "병물질", "정물질", "무물질", "기물질", "경물질", "신물질",
+          "해물질", "수물질", "차물질", "토물질" };
+    private static readonly Regex SplitDotRe = new(@"(?<=[.])\s+", RegexOptions.Compiled);
+
+    public static List<string> SplitSentsDot(string text) =>
+        SplitDotRe.Split(text.Trim()).Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+
+    /// <summary>app/paraphrase.py _auto_compounds — 붙여 쓴 복합명사를 원문 그대로 추출.</summary>
+    public static List<string> AutoCompounds(string sentence, IKiwi kiwi)
+    {
+        IReadOnlyList<(string form, string tag, int start)> toks;
+        try { toks = kiwi.TokenizeFull(sentence); }
+        catch { return new List<string>(); }
+        var comps = new List<string>();
+        int i = 0, n = toks.Count;
+        while (i < n)
+        {
+            if (NounTags.Contains(toks[i].tag))
+            {
+                int j = i;
+                while (j + 1 < n && NounTags.Contains(toks[j + 1].tag)
+                       && toks[j + 1].start == toks[j].start + toks[j].form.Length)
+                    j++;
+                if (j > i)
+                {
+                    int start = toks[i].start;
+                    int end = toks[j].start + toks[j].form.Length;
+                    string surf = sentence.Substring(start, end - start);
+                    if (surf.Length >= 2) comps.Add(surf);
+                }
+                i = j + 1;
+            }
+            else i++;
+        }
+        return comps;
+    }
+
+    /// <summary>app/paraphrase.py _mask_terms — 등록 용어+복합명사를 플레이스홀더로. (순서 보존 매핑)</summary>
+    public static (string masked, List<(string ph, string orig)> mapping) MaskTerms(
+        string sentence, IKiwi kiwi, IReadOnlyCollection<string> glossaryTerms)
+    {
+        var targets = new List<string>();
+        foreach (var t in glossaryTerms.OrderByDescending(x => x.Length).ThenBy(x => x, StringComparer.Ordinal))
+            if (t.Length > 0 && !targets.Contains(t)) targets.Add(t);
+        var comps = new HashSet<string>(AutoCompounds(sentence, kiwi));
+        foreach (var c in comps.OrderByDescending(x => x.Length).ThenBy(x => x, StringComparer.Ordinal))
+            if (!targets.Contains(c)) targets.Add(c);
+
+        string masked = sentence;
+        var mapping = new List<(string, string)>();
+        int i = 0;
+        foreach (var t in targets)
+        {
+            if (t.Length > 0 && masked.Contains(t, StringComparison.Ordinal) && i < Masks.Length)
+            {
+                string ph = Masks[i];
+                masked = masked.Replace(t, ph);
+                mapping.Add((ph, t));
+                i++;
+            }
+        }
+        return (masked, mapping);
+    }
+
+    /// <summary>app/paraphrase.py _unmask — 글자 사이 공백 허용해 원어 복원.</summary>
+    public static string Unmask(string text, List<(string ph, string orig)> mapping)
+    {
+        foreach (var (ph, orig) in mapping)
+        {
+            var pat = string.Join(@"\s*", ph.Select(c => Regex.Escape(c.ToString())));
+            text = Regex.Replace(text, pat, orig.Replace("$", "$$"));
+        }
+        return text;
+    }
+
+    /// <summary>app/paraphrase.py _merge_forms — 쪼갠 문장들을 접속사로 병합(마지막 절만 명사형).</summary>
+    public static List<string> MergeForms(IReadOnlyList<string> msents, PyRandom rng, IKiwi kiwi, int rounds = 8)
+    {
+        if (msents.Count < 2) return new List<string>();
+        List<List<(string form, string tag)>> morphset;
+        try { morphset = msents.Select(s => kiwi.Tokenize(s).ToList()).ToList(); }
+        catch { return new List<string>(); }
+        var outp = new List<string>();
+        var seen = new HashSet<string>();
+        for (int r = 0; r < rounds; r++)
+        {
+            var parts = new List<List<(string, string)>>();
+            for (int idx = 0; idx < morphset.Count; idx++)
+                parts.Add(idx < morphset.Count - 1 ? ClauseForm(morphset[idx], rng) : morphset[idx].ToList());
+            var flat = parts.SelectMany(p => p).ToList();
+            string surf;
+            try { surf = FixSpacing(Postprocess.ToNominalEndings(kiwi.Join(flat))); }
+            catch { continue; }
+            if (surf.Replace(" ", "").Length > 0 && seen.Add(surf.Replace(" ", ""))) outp.Add(surf);
+        }
+        return outp;
+    }
+
+    /// <summary>app/paraphrase.py _recombine_paraphrase — 다문장 입력을 문장별 변형해 재조합.</summary>
+    public static List<string> RecombineParaphrase(string sentence, int n, IKiwi kiwi,
+        IReadOnlyCollection<string> glossaryTerms, IReadOnlyList<string> rejected)
+    {
+        var (masked, mapping) = MaskTerms(sentence, kiwi, glossaryTerms);
+        var msents = SplitSentsDot(masked);
+        var rng = new PyRandom(SeedOf(sentence));
+        var pools = new List<List<string>>();
+        foreach (var ms in msents)
+        {
+            bool ev = IsEvalSent(ms);
+            pools.Add(SentenceVariants(ms, ev ? 6 : 3, rng, ev, kiwi));
+        }
+        var results = new List<string>();
+        var seen = new HashSet<string> { sentence.Replace(" ", "") };
+        int tries = 0, limit = n * 150;
+        double sim = 0.965;
+        while (results.Count < n && tries < limit)
+        {
+            tries++;
+            var chosen = pools.Select(p => rng.Choice(p)).ToList();
+            string combo;
+            if (chosen.Count >= 2 && rng.Random() < 0.55)
+            {
+                var mv = MergeForms(chosen, rng, kiwi, 1);
+                combo = mv.Count > 0 ? mv[0] : string.Join(" ", chosen);
+            }
+            else combo = string.Join(" ", chosen);
+            string full = Unmask(combo, mapping);
+            string key = full.Replace(" ", "");
+            if (seen.Contains(key)) continue;
+            if (TooSimilar(full, sentence, 0.985)) continue;
+            if (rejected.Any(rj => TooSimilar(full, rj, 0.9))) continue;
+            if (results.Any(r => TooSimilar(full, r, sim))) continue;
+            seen.Add(key);
+            results.Add(full);
+            if (tries > limit * 0.6 && results.Count < n) sim = 0.99;
+        }
+        return results.Take(n).ToList();
     }
 }

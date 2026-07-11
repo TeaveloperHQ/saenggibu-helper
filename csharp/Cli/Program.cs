@@ -78,6 +78,17 @@ if (args.Length > 0 && args[0] == "bench")
     return 0;
 }
 
+// 서브커맨드: rtest <modelPath> <sent> <n> — _recombine_paraphrase 파리티
+if (args.Length > 0 && args[0] == "rtest")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    using var kiwi = new Cli.KiwiNative(args[1]);
+    var res = Paraphrase.RecombineParaphrase(args[2], int.Parse(args[3]), kiwi,
+        Array.Empty<string>(), Array.Empty<string>());
+    foreach (var v in res) Console.WriteLine(v);
+    return 0;
+}
+
 // 서브커맨드: svtest <modelPath> <sent> <k> <adv0|1> — _sentence_variants 파리티
 if (args.Length > 0 && args[0] == "svtest")
 {
