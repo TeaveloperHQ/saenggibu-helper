@@ -137,4 +137,109 @@ public static class Paraphrase
         }
         return true;
     }
+
+    /// <summary>app/paraphrase.py _seed_of — 문장별 결정론 시드.</summary>
+    public static long SeedOf(string text)
+    {
+        long s = 0;
+        int len = Math.Min(64, text.Length);
+        for (int i = 0; i < len; i++) s += (long)text[i] * (i + 1);
+        return s & 0xFFFFFFFFL;
+    }
+
+    /// <summary>app/paraphrase.py _subject_evals — 과목명 유연 매칭.</summary>
+    public static List<string> SubjectEvals(string subject)
+    {
+        subject = (subject ?? "").Trim();
+        if (subject.Length == 0) return new List<string>();
+        foreach (var kv in ParaphraseData.SubjectEval)
+            if (subject.Contains(kv.Key, StringComparison.Ordinal) || kv.Key.Contains(subject, StringComparison.Ordinal))
+                return kv.Value.ToList();
+        return new List<string>();
+    }
+
+    private static string TagBase(string tag) => tag.Split('-')[0];
+
+    /// <summary>app/paraphrase.py _clause_form — 명사형 종결을 연결어미 절로.</summary>
+    public static List<(string form, string tag)> ClauseForm(
+        IReadOnlyList<(string form, string tag)> morphs, PyRandom rng)
+    {
+        var ms = morphs.ToList();
+        while (ms.Count > 0 && TagBase(ms[^1].tag) is "SF" or "SP" or "SE" or "SS" or "ETN" or "EF")
+            ms.RemoveAt(ms.Count - 1);
+        if (ms.Count > 0 && TagBase(ms[^1].tag) is "VV" or "VA" or "VX" or "XSV" or "XSA")
+        {
+            var (stem, tag) = ms[^1];
+            var ecs = new List<string> { "며", "고" };
+            if (TagBase(tag) == "XSV" || stem.EndsWith("하", StringComparison.Ordinal))
+                ecs = new List<string> { "며", "고", "여" };
+            ms.Add((rng.Choice(ecs), "EC"));
+        }
+        return ms;
+    }
+
+    /// <summary>app/paraphrase.py _sentence_variants — 한 문장의 본문 변형(동의어·연결어미·부사).</summary>
+    public static List<string> SentenceVariants(string sent, int k, PyRandom rng, bool adverbs, IKiwi kiwi)
+    {
+        List<(string form, string tag)> morphs;
+        try { morphs = kiwi.Tokenize(sent).ToList(); }
+        catch { return new List<string> { sent }; }
+        var opts = Alternatives(morphs);
+        var varPos = Enumerable.Range(0, opts.Count).Where(i => opts[i].Count > 1).ToList();
+        var outp = new List<string>();
+        var seen = new HashSet<string>();
+
+        void Add(IReadOnlyList<(string, string)> ms)
+        {
+            string s;
+            try { s = FixSpacing(Postprocess.ToNominalEndings(kiwi.Join(ms))); }
+            catch { return; }
+            string key = s.Replace(" ", "");
+            if (key.Length > 0 && seen.Add(key)) outp.Add(s);
+        }
+
+        Add(morphs);
+        foreach (var i in varPos)
+            foreach (var alt in opts[i].Where(a => a != morphs[i].form).Take(2))
+            {
+                var ch = morphs.ToList();
+                ch[i] = (alt, morphs[i].tag);
+                Add(ch);
+            }
+
+        if (IsEvalSent(sent))
+        {
+            foreach (var bas in outp.ToList())
+            {
+                string b = bas.TrimEnd('.', ' ');
+                foreach (var (pat, reps) in ParaphraseData.EvalPredSwap)
+                    if (b.EndsWith(pat, StringComparison.Ordinal))
+                    {
+                        foreach (var rep in reps)
+                        {
+                            string s2 = b[..^pat.Length] + rep;
+                            if (seen.Add(s2.Replace(" ", ""))) outp.Add(s2);
+                        }
+                        break;
+                    }
+            }
+        }
+
+        if (adverbs && outp.Count < k)
+        {
+            var advPts = Enumerable.Range(0, morphs.Count).Where(i =>
+                morphs[i].tag == "NNG" && i + 1 < morphs.Count && morphs[i + 1].form == "하"
+                && (morphs[i + 1].tag is "XSV" or "XSA")).ToList();
+            var advs = ParaphraseData.Adverbs.ToList();
+            rng.Shuffle(advs);
+            foreach (var i in advPts)
+                foreach (var adv in advs)
+                {
+                    if (outp.Count >= k + 2) break;
+                    var ms = morphs.Take(i).Append((adv, "MAG")).Concat(morphs.Skip(i)).ToList();
+                    Add(ms);
+                }
+        }
+        return outp.Take(Math.Max(k, 1)).ToList();
+    }
 }

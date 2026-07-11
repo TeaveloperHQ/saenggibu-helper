@@ -134,4 +134,7 @@ public sealed class PyRandom
 
     /// <summary>random.choice(seq).</summary>
     public T Choice<T>(IReadOnlyList<T> seq) => seq[RandBelow(seq.Count)];
+
+    /// <summary>random.randrange(stop) = _randbelow(stop).</summary>
+    public int RandRange(int stop) => RandBelow(stop);
 }

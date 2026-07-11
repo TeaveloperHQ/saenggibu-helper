@@ -55,6 +55,13 @@ def main() -> int:
     L += emit_map("NounMap", P._NOUN_MAP); L.append("")
     L += emit_map("Ec", P._EC); L.append("")
     L += emit_map("SubjectEval", P._SUBJECT_EVAL); L.append("")
+    # EvalPredSwap: 순서 의존(돋보임/보임 접미사 우선순위) → 순서 보존 배열
+    L.append("    public static readonly (string pat, string[] reps)[] EvalPredSwap =")
+    L.append("    {")
+    for k, v in P._EVAL_PRED_SWAP.items():
+        L.append(f"        ({cs_str(k)}, new[] {cs_arr(v)}),")
+    L.append("    };")
+    L.append("")
     L += emit_list("Adverbs", P._ADVERBS); L.append("")
     L += emit_list("Idioms", P._IDIOMS); L.append("")
     L += emit_list("EvalClauses", P._EVAL_CLAUSES); L.append("")

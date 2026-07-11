@@ -43,6 +43,17 @@ if (args.Length > 0 && args[0] == "ptest")
     return 0;
 }
 
+// 서브커맨드: svtest <modelPath> <sent> <k> <adv0|1> — _sentence_variants 파리티
+if (args.Length > 0 && args[0] == "svtest")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    using var kiwi = new Cli.KiwiNative(args[1]);
+    var vars = Paraphrase.SentenceVariants(args[2], int.Parse(args[3]),
+        new PyRandom(42), args[4] == "1", kiwi);
+    foreach (var v in vars) Console.WriteLine(v);
+    return 0;
+}
+
 string goldenPath = args.Length > 0
     ? args[0]
     : Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "golden", "golden.json");
