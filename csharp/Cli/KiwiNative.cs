@@ -38,6 +38,10 @@ public sealed class KiwiNative : IKiwi, IDisposable
     [DllImport(Lib)] private static extern int kiwi_close(IntPtr handle);
     [DllImport(Lib)] private static extern IntPtr kiwi_version();
     [DllImport(Lib)] private static extern IntPtr kiwi_error();
+    [DllImport(Lib)] private static extern IntPtr kiwi_new_joiner(IntPtr handle, int lmSearch);
+    [DllImport(Lib)] private static extern int kiwi_joiner_add(IntPtr joiner, [MarshalAs(UnmanagedType.LPUTF8Str)] string form, [MarshalAs(UnmanagedType.LPUTF8Str)] string tag, int option);
+    [DllImport(Lib)] private static extern IntPtr kiwi_joiner_get(IntPtr joiner);
+    [DllImport(Lib)] private static extern int kiwi_joiner_close(IntPtr joiner);
 
     private IntPtr _h;
 
@@ -81,7 +85,18 @@ public sealed class KiwiNative : IKiwi, IDisposable
     }
 
     public string Join(IReadOnlyList<(string form, string tag)> morphs)
-        => throw new NotImplementedException("kiwi_joiner 별도 구현(후속)");
+    {
+        IntPtr j = kiwi_new_joiner(_h, 1);           // lm_search=1 (kiwipiepy 기본)
+        if (j == IntPtr.Zero)
+            throw new InvalidOperationException("kiwi_new_joiner 실패");
+        try
+        {
+            foreach (var (form, tag) in morphs)
+                kiwi_joiner_add(j, form, tag, 0);
+            return Marshal.PtrToStringUTF8(kiwi_joiner_get(j)) ?? "";
+        }
+        finally { kiwi_joiner_close(j); }
+    }
 
     public void Dispose()
     {

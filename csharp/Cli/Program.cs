@@ -20,6 +20,9 @@ if (args.Length > 0 && args[0] == "kiwi")
     string sent = args.Length > 2 ? args[2] : "산과 염기 반응을 지시약으로 확인하는 실험을 설계함";
     foreach (var (form, tag) in kiwi.Tokenize(sent))
         Console.WriteLine($"{form}\t{tag}");
+    Console.WriteLine("--- join ---");
+    Console.WriteLine(kiwi.Join(new[] { ("수행", "NNG"), ("하", "XSV"), ("며", "EC") }));
+    Console.WriteLine(kiwi.Join(new[] { ("책임", "NNG"), ("감", "XSN"), ("을", "JKO"), ("보이", "VV"), ("ᆷ", "ETN") }));
     return 0;
 }
 
