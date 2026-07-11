@@ -78,6 +78,13 @@ if (args.Length > 0 && args[0] == "bench")
     return 0;
 }
 
+// 서브커맨드: gguftest <path> — LooksLikeGguf 파리티
+if (args.Length > 0 && args[0] == "gguftest")
+{
+    Console.WriteLine(Downloader.LooksLikeGguf(args[1]) ? "True" : "False");
+    return 0;
+}
+
 // 서브커맨드: xlsxtest <path> — parse_xlsx 파리티
 if (args.Length > 0 && args[0] == "xlsxtest")
 {
