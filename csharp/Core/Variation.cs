@@ -64,4 +64,69 @@ public static class Variation
             if (seen.Add(s)) outp.Add(s);
         return outp;
     }
+
+    private static readonly Regex Ws = new(@"\s+", RegexOptions.Compiled);
+    private static string Norm(string s) => Ws.Replace(s, "");
+
+    private static string EnsurePeriod(string s)
+    {
+        s = s.Trim();
+        return (s.EndsWith(".") || s.EndsWith("!") || s.EndsWith("?")) ? s : s + ".";
+    }
+
+    private static long Factorial(int k)
+    {
+        long f = 1;
+        for (int i = 2; i <= k; i++) f *= i;
+        return f;
+    }
+
+    /// <summary>app/variation.py combine_variants — 어순 재배열+표현 선택 조합(PyRandom(42) 결정론).</summary>
+    public static List<string> CombineVariants(List<List<string>> groups, int n)
+    {
+        groups = groups.Select(g => g.Where(p => p.Trim().Length > 0).Select(EnsurePeriod).ToList())
+                       .Where(g => g.Count > 0).ToList();
+        int k = groups.Count;
+        if (k == 0) return new List<string>();
+
+        var outp = new List<string>();
+        var seen = new HashSet<string>();
+
+        if (k == 1)
+        {
+            foreach (var bas in DedupPreserveOrder(groups[0]))
+                foreach (var v in SynonymVariants(bas))
+                {
+                    if (seen.Add(Norm(v))) { outp.Add(v); if (outp.Count >= n) return outp; }
+                }
+            return outp;
+        }
+
+        long space = Factorial(k);
+        foreach (var g in groups) space *= g.Count;
+        long target = Math.Min(n, space);
+
+        var rng = new PyRandom(42);
+        var idxs = Enumerable.Range(0, k).ToList();
+        int attempts = 0;
+        long maxAttempts = target * 80 + 500;
+        while (outp.Count < target && attempts < maxAttempts)
+        {
+            attempts++;
+            var perm = new List<int>(idxs);
+            rng.Shuffle(perm);
+            var parts = new List<string>(k);
+            foreach (var i in perm) parts.Add(rng.Choice(groups[i]));  // perm 순서로 choice 소비
+            string text = string.Join(" ", parts);
+            if (seen.Add(Norm(text))) outp.Add(text);
+        }
+
+        if (outp.Count < n)
+            foreach (var t in outp.ToList())
+                foreach (var v in SynonymVariants(t))
+                {
+                    if (seen.Add(Norm(v))) { outp.Add(v); if (outp.Count >= n) return outp; }
+                }
+        return outp.Count > n ? outp.Take(n).ToList() : outp;
+    }
 }

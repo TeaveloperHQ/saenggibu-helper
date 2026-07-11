@@ -153,6 +153,47 @@ foreach (var (c, i) in Iter("parse_student_label"))
           $"{num}|{name}", J(c.GetProperty("in")));
 }
 
+// ── PyRandom(Python random 재현) ───────────────────────────────────────
+if (root.TryGetProperty("pyrandom", out var pr))
+{
+    var r1 = new PyRandom(42);
+    string eG = string.Join(",", pr.GetProperty("getrandbits32").EnumerateArray().Select(x => x.GetUInt32()));
+    string aG = string.Join(",", Enumerable.Range(0, 8).Select(_ => r1.GenrandUint32()));
+    Check("pyrandom.getrandbits32", 0, eG, aG);
+
+    var r2 = new PyRandom(42);
+    var lst = Enumerable.Range(0, 12).ToList(); r2.Shuffle(lst);
+    Check("pyrandom.shuffle12", 0,
+          string.Join(",", pr.GetProperty("shuffle12").EnumerateArray().Select(x => x.GetInt32())),
+          string.Join(",", lst));
+
+    var r3 = new PyRandom(42);
+    var pool = new[] { "a", "b", "c", "d", "e" };
+    Check("pyrandom.choice5", 0,
+          string.Join("", JArr(pr.GetProperty("choice5"))),
+          string.Join("", Enumerable.Range(0, 8).Select(_ => r3.Choice(pool))));
+
+    var r4 = new PyRandom(42);
+    Check("pyrandom.random15", 0,
+          string.Join(",", JArr(pr.GetProperty("random15"))),
+          string.Join(",", Enumerable.Range(0, 4).Select(_ => r4.Random().ToString("F15", System.Globalization.CultureInfo.InvariantCulture))));
+
+    var r5 = new PyRandom(123);
+    Check("pyrandom.getrandbits32_s123", 0,
+          string.Join(",", pr.GetProperty("getrandbits32_s123").EnumerateArray().Select(x => x.GetUInt32())),
+          string.Join(",", Enumerable.Range(0, 4).Select(_ => r5.GenrandUint32())));
+}
+
+// ── combine_variants(RNG 조합) ─────────────────────────────────────────
+foreach (var (c, i) in Iter("combine_variants"))
+{
+    var groups = c.GetProperty("groups").EnumerateArray()
+        .Select(g => g.EnumerateArray().Select(x => x.GetString() ?? "").ToList()).ToList();
+    var got = Variation.CombineVariants(groups, c.GetProperty("n").GetInt32());
+    Check("combine_variants", i, string.Join("¶", JArr(c.GetProperty("out"))),
+          string.Join("¶", got), $"n={c.GetProperty("n").GetInt32()}");
+}
+
 // ── compliance ─────────────────────────────────────────────────────────
 foreach (var (c, i) in Iter("compliance_check"))
 {
