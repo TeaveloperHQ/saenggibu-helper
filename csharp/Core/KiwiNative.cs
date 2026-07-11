@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using Saenggibu;
 
-namespace Cli;
+namespace Saenggibu;
 
 /// <summary>
 /// Kiwi C-API(libkiwi) P/Invoke — IKiwi 구현. kiwipiepy와 동일 엔진(v0.23.2)+모델이면

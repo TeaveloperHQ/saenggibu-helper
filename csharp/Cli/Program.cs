@@ -15,8 +15,8 @@ if (args.Length > 0 && args[0] == "infer")
 if (args.Length > 0 && args[0] == "kiwi")
 {
     Console.OutputEncoding = Encoding.UTF8;
-    Console.WriteLine($"Kiwi {Cli.KiwiNative.Version()}");
-    using var kiwi = new Cli.KiwiNative(args[1]);
+    Console.WriteLine($"Kiwi {KiwiNative.Version()}");
+    using var kiwi = new KiwiNative(args[1]);
     string sent = args.Length > 2 ? args[2] : "산과 염기 반응을 지시약으로 확인하는 실험을 설계함";
     foreach (var (form, tag) in kiwi.Tokenize(sent))
         Console.WriteLine($"{form}\t{tag}");
@@ -30,7 +30,7 @@ if (args.Length > 0 && args[0] == "kiwi")
 if (args.Length > 0 && args[0] == "ptest")
 {
     Console.OutputEncoding = Encoding.UTF8;
-    using var kiwi = new Cli.KiwiNative(args[1]);
+    using var kiwi = new KiwiNative(args[1]);
     var morphs = kiwi.Tokenize(args[2]).ToList();
     // alternatives: 후보>1인 위치만 "form:a|b|c"
     var alts = Paraphrase.Alternatives(morphs);
@@ -47,7 +47,7 @@ if (args.Length > 0 && args[0] == "ptest")
 if (args.Length > 0 && args[0] == "bench")
 {
     Console.OutputEncoding = Encoding.UTF8;
-    using var kiwi = new Cli.KiwiNative(args[1]);
+    using var kiwi = new KiwiNative(args[1]);
     var sents = new[]
     {
         "맡은 역할을 성실히 수행하며 책임감을 보임", "실험을 설계하고 결과를 분석함",
@@ -82,7 +82,7 @@ if (args.Length > 0 && args[0] == "bench")
 if (args.Length > 0 && args[0] == "rtest")
 {
     Console.OutputEncoding = Encoding.UTF8;
-    using var kiwi = new Cli.KiwiNative(args[1]);
+    using var kiwi = new KiwiNative(args[1]);
     var res = Paraphrase.RecombineParaphrase(args[2], int.Parse(args[3]), kiwi,
         Array.Empty<string>(), Array.Empty<string>());
     foreach (var v in res) Console.WriteLine(v);
@@ -93,7 +93,7 @@ if (args.Length > 0 && args[0] == "rtest")
 if (args.Length > 0 && args[0] == "svtest")
 {
     Console.OutputEncoding = Encoding.UTF8;
-    using var kiwi = new Cli.KiwiNative(args[1]);
+    using var kiwi = new KiwiNative(args[1]);
     var vars = Paraphrase.SentenceVariants(args[2], int.Parse(args[3]),
         new PyRandom(42), args[4] == "1", kiwi);
     foreach (var v in vars) Console.WriteLine(v);
