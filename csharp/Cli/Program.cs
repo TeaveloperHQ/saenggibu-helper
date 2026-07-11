@@ -153,6 +153,19 @@ foreach (var (c, i) in Iter("parse_student_label"))
           $"{num}|{name}", J(c.GetProperty("in")));
 }
 
+// ── compliance ─────────────────────────────────────────────────────────
+foreach (var (c, i) in Iter("compliance_check"))
+{
+    string exp = string.Join("¶", c.GetProperty("out").EnumerateArray()
+        .Select(t => string.Join("|", t.EnumerateArray().Select(x => x.GetString()))));
+    string act = string.Join("¶", Compliance.Check(J(c.GetProperty("in")))
+        .Select(t => $"{t.level}|{t.cat}|{t.token}"));
+    Check("compliance_check", i, exp, act, J(c.GetProperty("in")));
+}
+foreach (var (c, i) in Iter("compliance_summary"))
+    Check("compliance_summary", i, J(c.GetProperty("out")),
+          Compliance.Summary(J(c.GetProperty("in"))), J(c.GetProperty("in")));
+
 // ── retrieve(SQLite end-to-end) ────────────────────────────────────────
 string retrPath = Path.Combine(Path.GetDirectoryName(goldenPath)!, "golden_retrieve.json");
 if (File.Exists(retrPath))

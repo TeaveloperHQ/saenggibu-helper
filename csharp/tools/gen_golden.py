@@ -18,6 +18,8 @@ sys.path.insert(0, str(REPO))
 from app.memory_store import (Example, _bm25_scores, _boost_subject,  # noqa: E402
                               tokenize)
 import app.glossary as glossary_mod  # noqa: E402
+from app.compliance import check as compliance_check  # noqa: E402
+from app.compliance import summary as compliance_summary  # noqa: E402
 from app.importer import extract_keywords, parse_records  # noqa: E402
 from app.paraphrase import (_bigrams, _clean_line, _fix_spacing,  # noqa: E402
                             _is_eval_sent, _too_similar)
@@ -154,6 +156,17 @@ GLOSSARY_WORDS_IN = [
 ]
 STUDENT_LABEL_IN = ["10101 김철수", "홍길동", "3반 이영희", "  20201   박 민수  ", "", "10101"]
 
+COMPLIANCE_IN = [
+    "TOEIC 900점을 받았으며 영어 실력이 뛰어남.",
+    "교내 수학 경시대회 대회에 참가하여 준비함.",
+    "모의고사 백분위 95를 기록함.",
+    "논문을 작성하고 특허를 출원함.",
+    "○○대학교 견학과 장학금 수혜.",
+    "산과 염기 반응을 지시약으로 확인하는 실험을 설계함.",
+    "어머니가 의사로 근무하심.",
+    "자격증을 취득하고 어학연수를 다녀옴.",
+]
+
 
 def glossary_words(terms):
     glossary_mod._terms = {" ".join(t.split()) for t in terms if t.strip()}
@@ -207,6 +220,8 @@ def main() -> int:
         "parse_records": [{"in": s, "mode": m, "out": parse_records(s, m)} for s, m in PARSE_REC_CASES],
         "glossary_words": [{"in": ts, "out": glossary_words(ts)} for ts in GLOSSARY_WORDS_IN],
         "parse_student_label": [{"in": s, "out": list(parse_student_label(s))} for s in STUDENT_LABEL_IN],
+        "compliance_check": [{"in": s, "out": [list(t) for t in compliance_check(s)]} for s in COMPLIANCE_IN],
+        "compliance_summary": [{"in": s, "out": compliance_summary(s)} for s in COMPLIANCE_IN],
     }
     dest = REPO / "csharp" / "golden" / "golden.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
