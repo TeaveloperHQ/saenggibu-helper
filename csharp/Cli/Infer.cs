@@ -32,6 +32,7 @@ public static class Infer
         }
 
         var sw = Stopwatch.StartNew();
+        bool flash = Environment.GetEnvironmentVariable("SGB_FLASH") == "1";  // 기본 off(llama-cpp-python 기본과 정렬)
         var mp = new ModelParams(modelPath)
         {
             ContextSize = (uint)Config.NCtx,
@@ -40,6 +41,7 @@ public static class Infer
             Threads = Config.NThreads,
             UseMemorymap = Config.UseMmap,
             UseMemoryLock = Config.UseMlock,
+            FlashAttention = flash,
         };
         using var weights = LLamaWeights.LoadFromFile(mp);
         double loadSec = sw.Elapsed.TotalSeconds;

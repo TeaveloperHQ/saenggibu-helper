@@ -8,3 +8,8 @@ obj/
 # NuGet
 packages/
 *.nupkg
+
+# 골든 SQLite 픽스처(gen_golden_retrieve.py 로 재생성) — 바이너리라 커밋 제외
+golden/*.sqlite3
+golden/*.sqlite3-wal
+golden/*.sqlite3-shm

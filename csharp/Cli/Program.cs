@@ -108,6 +108,33 @@ foreach (var (c, i) in Iter("build_user_prompt"))
           $"{J(c.GetProperty("area"))} n={c.GetProperty("n").GetInt32()}");
 }
 
+// ── retrieve(SQLite end-to-end) ────────────────────────────────────────
+string retrPath = Path.Combine(Path.GetDirectoryName(goldenPath)!, "golden_retrieve.json");
+if (File.Exists(retrPath))
+{
+    using var rdoc = JsonDocument.Parse(File.ReadAllText(retrPath));
+    var rroot = rdoc.RootElement;
+    string dbPath = Path.Combine(Path.GetDirectoryName(retrPath)!, rroot.GetProperty("db").GetString()!);
+    using var store = new MemoryStore(dbPath);
+
+    int ri = 0;
+    foreach (var c in rroot.GetProperty("retrieve").EnumerateArray())
+    {
+        var got = store.Retrieve(J(c.GetProperty("area")), J(c.GetProperty("query")),
+                                 c.GetProperty("k").GetInt32(), J(c.GetProperty("subject")));
+        Check("retrieve", ri++, string.Join("|", JArr(c.GetProperty("out"))),
+              string.Join("|", got.Select(e => e.OutputText)), J(c.GetProperty("query")));
+    }
+    int si = 0;
+    foreach (var c in rroot.GetProperty("retrieve_seed").EnumerateArray())
+    {
+        var got = store.RetrieveSeed(J(c.GetProperty("area")), J(c.GetProperty("query")),
+                                     c.GetProperty("k").GetInt32(), J(c.GetProperty("subject")));
+        Check("retrieve_seed", si++, string.Join("|", JArr(c.GetProperty("out"))),
+              string.Join("|", got.Select(e => e.OutputText)), J(c.GetProperty("query")));
+    }
+}
+
 // ── 결과 ───────────────────────────────────────────────────────────────
 Console.WriteLine($"\n=== Tier A 골든 회귀: {pass} PASS / {fail} FAIL ===");
 foreach (var f in failures) Console.WriteLine("\n" + f);
