@@ -78,6 +78,18 @@ if (args.Length > 0 && args[0] == "bench")
     return 0;
 }
 
+// 서브커맨드: rostertest <dir> <area> — roster_data 파리티
+if (args.Length > 0 && args[0] == "rostertest")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    foreach (var kv in RosterData.ClassesAndStudents(args[1], args.Length > 2 ? args[2] : null))
+        Console.WriteLine($"CS {kv.Key}: {string.Join(", ", kv.Value)}");
+    if (args.Length > 2)
+        foreach (var (klass, num, name) in RosterData.RosterRecords(args[1], args[2]))
+            Console.WriteLine($"REC {klass}|{num}|{name}");
+    return 0;
+}
+
 // 서브커맨드: rtest <modelPath> <sent> <n> — _recombine_paraphrase 파리티
 if (args.Length > 0 && args[0] == "rtest")
 {
