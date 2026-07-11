@@ -26,6 +26,23 @@ if (args.Length > 0 && args[0] == "kiwi")
     return 0;
 }
 
+// 서브커맨드: ptest <modelPath> <sentence> — _alternatives/_reorder 파리티 출력
+if (args.Length > 0 && args[0] == "ptest")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    using var kiwi = new Cli.KiwiNative(args[1]);
+    var morphs = kiwi.Tokenize(args[2]).ToList();
+    // alternatives: 후보>1인 위치만 "form:a|b|c"
+    var alts = Paraphrase.Alternatives(morphs);
+    var altStr = Enumerable.Range(0, morphs.Count).Where(i => alts[i].Count > 1)
+        .Select(i => $"{morphs[i].form}:{string.Join("|", alts[i])}");
+    Console.WriteLine("ALT " + string.Join(" ", altStr));
+    // reorder(PyRandom(42)) → join
+    var reordered = Paraphrase.Reorder(morphs, new PyRandom(42));
+    Console.WriteLine("REORDER " + kiwi.Join(reordered));
+    return 0;
+}
+
 string goldenPath = args.Length > 0
     ? args[0]
     : Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "golden", "golden.json");

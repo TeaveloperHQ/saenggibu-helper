@@ -72,4 +72,69 @@ public static class Paraphrase
         @"(보임|돋보임|뛰어남|우수함|발휘|지님|엿보임|인상적|강함|높음|빠름)", RegexOptions.Compiled);
 
     public static bool IsEvalSent(string s) => EvalSentRe.IsMatch(s);
+
+    // ── kiwi 형태소 기반 변형 엔진(결정론 부분) ──────────────────────────
+    /// <summary>app/paraphrase.py _alternatives — 각 형태소 위치의 치환 후보(원형 포함).</summary>
+    public static List<List<string>> Alternatives(IReadOnlyList<(string form, string tag)> morphs)
+    {
+        var opts = new List<List<string>>();
+        int n = morphs.Count;
+        for (int i = 0; i < n; i++)
+        {
+            var (form, tag) = morphs[i];
+            var alts = new List<string> { form };
+            bool compound = i + 2 < n && morphs[i + 1].tag == "EC"
+                && (morphs[i + 1].form == "어" || morphs[i + 1].form == "아")
+                && (morphs[i + 2].tag is "VV" or "VA" or "VX");
+            if ((tag is "VV" or "VA") && !compound && ParaphraseData.VerbMap.TryGetValue(form, out var v))
+                alts.AddRange(v);
+            else if (tag == "NNG" && i + 1 < n && morphs[i + 1].form == "하"
+                     && (morphs[i + 1].tag is "XSV" or "XSA")
+                     && ParaphraseData.PredMap.TryGetValue(form, out var p))
+                alts.AddRange(p);
+            else if (tag == "NNG" && ParaphraseData.NounMap.TryGetValue(form, out var no))
+                alts.AddRange(no);
+            else if (tag == "EC" && ParaphraseData.Ec.TryGetValue(form, out var e))
+                alts.AddRange(e);
+            opts.Add(alts);
+        }
+        return opts;
+    }
+
+    /// <summary>app/paraphrase.py _reorder — 안전 연결어미(고·며·여)에서 절을 나눠 순서 셔플.</summary>
+    public static List<(string form, string tag)> Reorder(
+        IReadOnlyList<(string form, string tag)> morphs, PyRandom rng)
+    {
+        var clauses = new List<(List<(string, string)> cl, bool nf)>();
+        var cur = new List<(string, string)>();
+        foreach (var m in morphs)
+        {
+            cur.Add(m);
+            if (m.tag == "EC" && ParaphraseData.SafeConn.Contains(m.form))
+            { clauses.Add((cur, true)); cur = new List<(string, string)>(); }
+        }
+        if (cur.Count > 0) clauses.Add((cur, false));
+        var nonfinal = clauses.Where(c => c.nf).Select(c => c.cl).ToList();
+        var final = clauses.Where(c => !c.nf).Select(c => c.cl).ToList();
+        if (nonfinal.Count < 2) return morphs.ToList();
+        var order = nonfinal.ToList();
+        rng.Shuffle(order);
+        if (SameOrder(order, nonfinal)) return morphs.ToList();
+        var flat = new List<(string, string)>();
+        foreach (var c in order) flat.AddRange(c);
+        foreach (var c in final) flat.AddRange(c);
+        return flat;
+    }
+
+    private static bool SameOrder(List<List<(string, string)>> a, List<List<(string, string)>> b)
+    {
+        if (a.Count != b.Count) return false;
+        for (int i = 0; i < a.Count; i++)
+        {
+            if (a[i].Count != b[i].Count) return false;
+            for (int j = 0; j < a[i].Count; j++)
+                if (a[i][j] != b[i][j]) return false;
+        }
+        return true;
+    }
 }
