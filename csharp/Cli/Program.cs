@@ -7,6 +7,10 @@ using Saenggibu;
 
 Console.OutputEncoding = Encoding.UTF8;
 
+// 서브커맨드: infer(Tier B 추론 스모크). 기본은 Tier A 골든 회귀.
+if (args.Length > 0 && args[0] == "infer")
+    return await Cli.Infer.RunAsync(args);
+
 string goldenPath = args.Length > 0
     ? args[0]
     : Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "golden", "golden.json");
