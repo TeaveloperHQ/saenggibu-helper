@@ -1,0 +1,10 @@
+# .NET 빌드 산출물
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+
+# NuGet
+packages/
+*.nupkg
