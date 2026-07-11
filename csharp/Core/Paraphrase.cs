@@ -384,4 +384,181 @@ public static class Paraphrase
         }
         return results.Take(n).ToList();
     }
+
+    /// <summary>app/paraphrase.py _split_clauses — 절 단위(고·며·여)로 쪼개 명사형으로.</summary>
+    public static List<string> SplitClauses(string text, IKiwi kiwi)
+    {
+        List<(string form, string tag)> toks;
+        try { toks = kiwi.Tokenize(text).ToList(); }
+        catch { return new List<string>(); }
+        var clauses = new List<List<(string, string)>>();
+        var cur = new List<(string, string)>();
+        foreach (var m in toks)
+        {
+            cur.Add(m);
+            if (m.tag == "EC" && ParaphraseData.SafeConn.Contains(m.form)) { clauses.Add(cur); cur = new(); }
+        }
+        if (cur.Count > 0) clauses.Add(cur);
+        var outp = new List<string>();
+        foreach (var c in clauses)
+        {
+            var cc = (c.Count > 0 && c[^1].Item2 == "EC") ? c.Take(c.Count - 1).ToList() : c;
+            if (cc.Count > 0 && (cc[^1].Item2 is "VV" or "VA" or "VX" or "XSV" or "XSA"))
+                cc = cc.Append(("ᆷ", "ETN")).ToList();
+            string surf;
+            try { surf = FixSpacing(Postprocess.ToNominalEndings(kiwi.Join(cc))).Trim(); }
+            catch { continue; }
+            if (surf.Length >= 4 && surf.Length <= 40) outp.Add(surf);
+        }
+        return outp;
+    }
+
+    private static string BalanceBody(string c)
+    {
+        string s = c.Split('.')[0];
+        foreach (var adv in ParaphraseData.Adverbs) s = s.Replace(adv, "");
+        s = s.Replace(" ", "");
+        return s.Length <= 26 ? s : s[..26];
+    }
+
+    /// <summary>app/paraphrase.py _balance_by_structure — 구조 그룹 라운드로빈(본문 다양성 우선).</summary>
+    public static List<string> BalanceByStructure(List<string> cands, int n, PyRandom rng)
+    {
+        var groups = new Dictionary<(string, string), List<(string c, string body)>>();
+        var order = new List<(string, string)>();
+        foreach (var c in cands)
+        {
+            var lab = Patterns.Classify(c);
+            var st = (lab["comp"], lab["end"]);
+            if (!groups.ContainsKey(st)) { groups[st] = new(); order.Add(st); }
+            groups[st].Add((c, BalanceBody(c)));
+        }
+        rng.Shuffle(order);
+        foreach (var st in order) rng.Shuffle(groups[st]);
+        var outp = new List<string>();
+        var seenBody = new HashSet<string>();
+        bool progressed = true;
+        while (outp.Count < n && progressed)
+        {
+            progressed = false;
+            foreach (var st in order)
+            {
+                var g = groups[st];
+                if (g.Count == 0) continue;
+                int pick = g.FindIndex(x => !seenBody.Contains(x.body));
+                if (pick < 0) pick = 0;
+                var (c, body) = g[pick]; g.RemoveAt(pick);
+                outp.Add(c); seenBody.Add(body); progressed = true;
+                if (outp.Count >= n) break;
+            }
+        }
+        return outp.Take(n).ToList();
+    }
+
+    private struct PoolItem { public string Kind; public List<(string, string)>? Ms; public string? Text; }
+
+    /// <summary>app/paraphrase.py _mechanical — 사전·어미·어순 기반 결정론 변형(LLM 폴백 안전판).</summary>
+    public static List<string> Mechanical(string sentence, int n, IKiwi kiwi, int seed = 42, string subject = "")
+    {
+        sentence = (sentence ?? "").Trim();
+        if (sentence.Length == 0) return new List<string>();
+        List<(string form, string tag)> morphs;
+        try { morphs = kiwi.Tokenize(sentence).ToList(); }
+        catch { return new List<string> { sentence }; }
+        var opts = Alternatives(morphs);
+        var varPos = Enumerable.Range(0, opts.Count).Where(i => opts[i].Count > 1).ToList();
+        bool canReorder = morphs.Count(m => m.tag == "EC") >= 2;
+        var rng = new PyRandom(seed);
+        var results = new List<string>();
+        var seen = new HashSet<string>();
+
+        void AddSurf(string surf)
+        {
+            surf = FixSpacing(Postprocess.ToNominalEndings(surf));
+            string key = surf.Replace(" ", "");
+            if (key.Length > 0 && seen.Add(key)) results.Add(surf);
+        }
+        void Add(List<(string, string)> ms) { try { AddSurf(kiwi.Join(ms)); } catch { } }
+
+        Add(morphs);
+        var evals = ParaphraseData.EvalClauses.Concat(SubjectEvals(subject)).ToList();
+        var poolPri = new List<PoolItem>();
+        var pool = new List<PoolItem>();
+
+        bool AdverbialBefore(int i)
+        {
+            if (i == 0) return false;
+            var (f, tg) = morphs[i - 1];
+            return tg == "MAG" || f == "으로" || f == "로"
+                || (f.Length > 0 && (f[^1] == '히' || f[^1] == '게' || f[^1] == '이'));
+        }
+        var advPoints = Enumerable.Range(0, morphs.Count).Where(i =>
+            morphs[i].tag == "NNG" && i + 1 < morphs.Count && morphs[i + 1].form == "하"
+            && (morphs[i + 1].tag is "XSV" or "XSA") && !AdverbialBefore(i)).ToList();
+        foreach (var i in advPoints)
+            foreach (var adv in ParaphraseData.Adverbs)
+                pool.Add(new PoolItem { Kind = "m", Ms = morphs.Take(i).Append((adv, "MAG")).Concat(morphs.Skip(i)).ToList() });
+
+        // ② 관용 표현 + 평가절 부착
+        int? eidx = null;
+        for (int i = morphs.Count - 1; i >= 0; i--)
+            if (morphs[i].tag is "ETN" or "EF") { eidx = i; break; }
+        string? baseC = null;
+        if (eidx is int e && e != 0 && (morphs[e - 1].tag is "VV" or "VA" or "XSV" or "VX"))
+        {
+            var et = morphs[e - 1].tag == "VA" ? ("ᆫ", "ETM") : ("는", "ETM");
+            string? bas = null;
+            try { bas = FixSpacing(kiwi.Join(morphs.Take(e).Append(et).ToList())); } catch { }
+            if (bas != null)
+                foreach (var idm in ParaphraseData.Idioms)
+                    pool.Add(new PoolItem { Kind = "s", Text = bas + " " + idm });
+            try
+            {
+                baseC = FixSpacing(kiwi.Join(morphs.Take(e).Append(("며", "EC")).ToList()));
+                foreach (var ev in evals) pool.Add(new PoolItem { Kind = "s", Text = baseC + " " + ev });
+            }
+            catch { baseC = null; }
+        }
+
+        if (morphs.Count(m => m.tag == "EC" && ParaphraseData.SafeConn.Contains(m.form)) >= 2)
+        {
+            var clauses = SplitClauses(sentence, kiwi);
+            if (clauses.Count >= 2) poolPri.Add(new PoolItem { Kind = "s", Text = string.Join(". ", clauses) });
+        }
+
+        string obs = FixSpacing(Postprocess.ToNominalEndings(kiwi.Join(morphs))).TrimEnd('.', ' ');
+        foreach (var ev in evals)
+        {
+            string conn = ParaphraseData.EvalConnectors[rng.RandRange(ParaphraseData.EvalConnectors.Length)];
+            pool.Add(new PoolItem { Kind = "two", Text = $"{obs}. {conn}{ev}" });
+        }
+
+        // ③-a 각 치환 위치 반드시 바꾼 변형
+        foreach (var i in varPos)
+            foreach (var alt in opts[i].Where(a => a != morphs[i].form).Take(2))
+            {
+                var chosen = morphs.ToList();
+                chosen[i] = (alt, morphs[i].tag);
+                poolPri.Add(new PoolItem { Kind = "m", Ms = chosen });
+            }
+        // ③-b 다중 치환 + 재배열
+        if (varPos.Count > 0 || canReorder)
+            for (int r = 0; r < n * 4; r++)
+            {
+                var chosen = morphs.ToList();
+                foreach (var i in varPos) chosen[i] = (rng.Choice(opts[i]), morphs[i].tag);
+                if (canReorder && rng.Random() < 0.55) chosen = Reorder(chosen, rng);
+                pool.Add(new PoolItem { Kind = "m", Ms = chosen });
+            }
+
+        rng.Shuffle(poolPri);
+        rng.Shuffle(pool);
+        int cap = Math.Max(n * 4, 24);
+        foreach (var it in poolPri.Concat(pool))
+        {
+            if (results.Count >= cap) break;
+            if (it.Kind == "m") Add(it.Ms!); else AddSurf(it.Text!);
+        }
+        return BalanceByStructure(results, n, rng);
+    }
 }

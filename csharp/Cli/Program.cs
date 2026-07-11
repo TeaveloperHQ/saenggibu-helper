@@ -78,6 +78,17 @@ if (args.Length > 0 && args[0] == "bench")
     return 0;
 }
 
+// 서브커맨드: mtest <modelPath> <sent> <n> [subject] — _mechanical 파리티
+if (args.Length > 0 && args[0] == "mtest")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    using var kiwi = new KiwiNative(args[1]);
+    var res = Paraphrase.Mechanical(args[2], int.Parse(args[3]), kiwi, 42,
+        args.Length > 4 ? args[4] : "");
+    foreach (var v in res) Console.WriteLine(v);
+    return 0;
+}
+
 // 서브커맨드: rostertest <dir> <area> — roster_data 파리티
 if (args.Length > 0 && args[0] == "rostertest")
 {
