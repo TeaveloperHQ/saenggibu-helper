@@ -133,6 +133,21 @@ if (File.Exists(retrPath))
         Check("retrieve_seed", si++, string.Join("|", JArr(c.GetProperty("out"))),
               string.Join("|", got.Select(e => e.OutputText)), J(c.GetProperty("query")));
     }
+
+    static string SerMsgs(IEnumerable<Engine.Message> ms) =>
+        string.Join("", ms.Select(m => m.Role + "" + m.Content));
+    int mi = 0;
+    foreach (var c in rroot.GetProperty("build_messages").EnumerateArray())
+    {
+        var area = Prompts.ByKey(J(c.GetProperty("area")))!;
+        var got = Engine.BuildMessages(area, store, J(c.GetProperty("subject")),
+            J(c.GetProperty("keywords")), J(c.GetProperty("tone")),
+            J(c.GetProperty("length_hint")), c.GetProperty("n").GetInt32());
+        string exp = string.Join("", c.GetProperty("out").EnumerateArray()
+            .Select(m => J(m.GetProperty("role")) + "" + J(m.GetProperty("content"))));
+        Check("build_messages", mi++, exp, SerMsgs(got),
+              $"{J(c.GetProperty("area"))} n={c.GetProperty("n").GetInt32()}");
+    }
 }
 
 // ── 결과 ───────────────────────────────────────────────────────────────

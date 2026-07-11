@@ -13,7 +13,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
+from app.engine import LlamaEngine  # noqa: E402
 from app.memory_store import MemoryStore  # noqa: E402
+from app.prompts import AREA_BY_KEY  # noqa: E402
 
 GOLDEN = REPO / "csharp" / "golden"
 DB = GOLDEN / "retrieve.sqlite3"
@@ -75,9 +77,26 @@ def main() -> int:
         res = store.retrieve_seed(area=c["area"], query=c["query"], k=c["k"], subject=c["subject"])
         seedr.append({**c, "out": [e.output_text for e in res]})
 
+    # engine._build_messages 파리티(같은 DB) — 모델 로드 없이 메시지 조립만
+    engine = LlamaEngine(store)
+    msg_cases = [
+        {"area": "seteuk", "subject": "수학", "keywords": "그래프 발표", "tone": "", "length_hint": "", "n": 1},
+        {"area": "seteuk", "subject": "과학", "keywords": "실험 설계 변인", "tone": "간결하게", "length_hint": "", "n": 1},
+        {"area": "haengteuk", "subject": "", "keywords": "책임감 성실", "tone": "", "length_hint": "", "n": 1},
+        {"area": "seteuk", "subject": "수학", "keywords": "함수 발표", "tone": "", "length_hint": "", "n": 5},
+    ]
+    build_msgs = []
+    for c in msg_cases:
+        area = AREA_BY_KEY[c["area"]]
+        msgs = engine._build_messages(area, subject=c["subject"], keywords=c["keywords"],
+                                      tone=c["tone"], length_hint=c["length_hint"],
+                                      n_variations=c["n"])
+        build_msgs.append({**c, "out": [{"role": m["role"], "content": m["content"]} for m in msgs]})
+
     store.close()  # WAL 체크포인트 → C#가 읽을 수 있게
 
-    out = {"db": "retrieve.sqlite3", "retrieve": retr, "retrieve_seed": seedr}
+    out = {"db": "retrieve.sqlite3", "retrieve": retr, "retrieve_seed": seedr,
+           "build_messages": build_msgs}
     (GOLDEN / "golden_retrieve.json").write_text(
         json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     print("wrote golden_retrieve.json + retrieve.sqlite3")
