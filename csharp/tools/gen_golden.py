@@ -17,9 +17,12 @@ sys.path.insert(0, str(REPO))
 
 from app.memory_store import (Example, _bm25_scores, _boost_subject,  # noqa: E402
                               tokenize)
+import app.glossary as glossary_mod  # noqa: E402
+from app.importer import extract_keywords, parse_records  # noqa: E402
 from app.paraphrase import (_bigrams, _clean_line, _fix_spacing,  # noqa: E402
                             _is_eval_sent, _too_similar)
 from app.patterns import classify  # noqa: E402
+from app.roster_data import parse_student_label  # noqa: E402
 from app.postprocess import nominalize_sentence, to_nominal_endings  # noqa: E402
 from app.prompts import AREA_BY_KEY, AREAS, build_user_prompt  # noqa: E402
 from app.variation import split_sentences  # noqa: E402
@@ -132,6 +135,30 @@ TOO_SIMILAR_PAIRS = [
 ]
 BIGRAMS_IN = ["가나다라", "ab cd", "한", "실험 설계"]
 
+EXTRACT_KW_IN = [
+    "산과 염기 반응을 지시약으로 확인하는 실험을 설계하였으며 결과를 분석함.",
+    "맡은 역할을 성실히 수행하며 책임감을 보임.",
+    "친구들과 협력하여 발표 자료를 준비하고 발표에 적극 참여함.",
+    "가나",
+]
+PARSE_REC_CASES = [
+    ("첫 기록 문장입니다.\n\n둘째 문단 기록.", "auto"),
+    ("한 줄 기록\n다른 줄 기록\n짧", "line"),
+    ("문단A 계속\n이어짐\n\n문단B 내용", "para"),
+    ("", "auto"),
+    ("단일 문단만 있음", "auto"),
+]
+GLOSSARY_WORDS_IN = [
+    ["아이오딘화 칼륨", "산 염기", "pH"],
+    ["일차함수 그래프", "x", "이차 방정식"],
+]
+STUDENT_LABEL_IN = ["10101 김철수", "홍길동", "3반 이영희", "  20201   박 민수  ", "", "10101"]
+
+
+def glossary_words(terms):
+    glossary_mod._terms = {" ".join(t.split()) for t in terms if t.strip()}
+    return sorted(glossary_mod.words())
+
 
 def system_cases():
     return [{"area": a.key, "out": a.system_prompt()} for a in AREAS]
@@ -176,6 +203,10 @@ def main() -> int:
         "is_eval_sent": [{"in": s, "out": _is_eval_sent(s)} for s in IS_EVAL_SENT_IN],
         "too_similar": [{"a": a, "b": b, "out": _too_similar(a, b)} for a, b in TOO_SIMILAR_PAIRS],
         "bigrams": [{"in": s, "out": sorted(_bigrams(s))} for s in BIGRAMS_IN],
+        "extract_keywords": [{"in": s, "out": extract_keywords(s)} for s in EXTRACT_KW_IN],
+        "parse_records": [{"in": s, "mode": m, "out": parse_records(s, m)} for s, m in PARSE_REC_CASES],
+        "glossary_words": [{"in": ts, "out": glossary_words(ts)} for ts in GLOSSARY_WORDS_IN],
+        "parse_student_label": [{"in": s, "out": list(parse_student_label(s))} for s in STUDENT_LABEL_IN],
     }
     dest = REPO / "csharp" / "golden" / "golden.json"
     dest.parent.mkdir(parents=True, exist_ok=True)

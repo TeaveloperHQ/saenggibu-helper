@@ -131,6 +131,28 @@ foreach (var (c, i) in Iter("bigrams"))
           string.Join(",", Paraphrase.Bigrams(J(c.GetProperty("in"))).OrderBy(x => x, StringComparer.Ordinal)),
           J(c.GetProperty("in")));
 
+// ── importer / glossary / roster (순수) ────────────────────────────────
+foreach (var (c, i) in Iter("extract_keywords"))
+    Check("extract_keywords", i, J(c.GetProperty("out")),
+          Importer.ExtractKeywords(J(c.GetProperty("in"))), J(c.GetProperty("in")));
+
+foreach (var (c, i) in Iter("parse_records"))
+    Check("parse_records", i, string.Join("¶", JArr(c.GetProperty("out"))),
+          string.Join("¶", Importer.ParseRecords(J(c.GetProperty("in")), J(c.GetProperty("mode")))),
+          $"{J(c.GetProperty("mode"))}");
+
+foreach (var (c, i) in Iter("glossary_words"))
+    Check("glossary_words", i, string.Join(",", JArr(c.GetProperty("out"))),
+          string.Join(",", Glossary.Words(JArr(c.GetProperty("in"))).OrderBy(x => x, StringComparer.Ordinal)),
+          "");
+
+foreach (var (c, i) in Iter("parse_student_label"))
+{
+    var (num, name) = RosterData.ParseStudentLabel(J(c.GetProperty("in")));
+    Check("parse_student_label", i, string.Join("|", JArr(c.GetProperty("out"))),
+          $"{num}|{name}", J(c.GetProperty("in")));
+}
+
 // ── retrieve(SQLite end-to-end) ────────────────────────────────────────
 string retrPath = Path.Combine(Path.GetDirectoryName(goldenPath)!, "golden_retrieve.json");
 if (File.Exists(retrPath))
