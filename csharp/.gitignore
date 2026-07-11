@@ -13,3 +13,6 @@ packages/
 golden/*.sqlite3
 golden/*.sqlite3-wal
 golden/*.sqlite3-shm
+
+# Kiwi 네이티브(재현: tools/fetch_kiwi_native.sh)
+native/

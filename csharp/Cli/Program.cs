@@ -11,6 +11,18 @@ Console.OutputEncoding = Encoding.UTF8;
 if (args.Length > 0 && args[0] == "infer")
     return await Cli.Infer.RunAsync(args);
 
+// 서브커맨드: kiwi <modelPath> "<문장>" — Kiwi C-API P/Invoke 형태소 분석 스모크
+if (args.Length > 0 && args[0] == "kiwi")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    Console.WriteLine($"Kiwi {Cli.KiwiNative.Version()}");
+    using var kiwi = new Cli.KiwiNative(args[1]);
+    string sent = args.Length > 2 ? args[2] : "산과 염기 반응을 지시약으로 확인하는 실험을 설계함";
+    foreach (var (form, tag) in kiwi.Tokenize(sent))
+        Console.WriteLine($"{form}\t{tag}");
+    return 0;
+}
+
 string goldenPath = args.Length > 0
     ? args[0]
     : Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "golden", "golden.json");
