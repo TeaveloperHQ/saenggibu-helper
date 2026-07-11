@@ -7,6 +7,8 @@ teaveloper 오프라인 앱 · Windows `.exe` 배포.
 - **모델**: Qwen2.5-7B-Instruct (Q4_K_M GGUF, Apache-2.0) — CPU 추론.
   생기부 문체로 파인튜닝한 모델(`saenggibu-natural-*`)을 함께 제공/선택할 수 있다.
 - **UI**: PySide6 데스크톱 단일 창. 상단 **모드 탭**(생성 / 학습 / 과정 안내) + 영역별 탭.
+- **수업 메모 도구**: 작업표시줄(트레이)에 상주하는 별도의 가벼운 앱. 수업 중 관찰을
+  단축키(**Ctrl+Alt+M**)로 즉시 적어 학급 명단에 누적한다(모델 불필요). 아래 전용 절 참고.
 - **학습**: 교사가 **저장**한 결과를 로컬 DB에 누적 → 다음 생성 때 유사 예시를
   BM25로 검색해 few-shot 주입하고, 자주 쓰는 부사·평가표현을 빈도 프로파일로 반영한다.
   (인터넷·추가 모델 불필요)
@@ -32,6 +34,19 @@ teaveloper 오프라인 앱 · Windows `.exe` 배포.
 2. **📚 학습 모드** — 백업/복원, 기본 모델 선택, 용어 사전 관리, 학습 현황 확인.
 3. **🗺 과정 안내** — 입력→변형/생성→검증→표 채움 과정 도식과 오프라인/온라인 처리 안내.
 
+## 수업 메모 도구 (트레이 상주 · 별도 실행 파일)
+메인 앱과 별개로 도는 **가벼운 메모 프로그램**(`quicknote.py` / 배포 시 `수업메모.exe`).
+모델을 쓰지 않아 즉시 뜨고, 수업 중 관찰을 빠르게 기록하는 용도다.
+
+- **실행 규칙**: 메인 앱은 아이콘 클릭으로, 메모 도구는 **부팅 시 자동 실행**되어
+  작업표시줄에 상주(최초 실행 시 Windows 시작 프로그램에 자동 등록). 두 앱은 아이콘으로 구분된다.
+- **팝업**: 트레이 아이콘 클릭 또는 **Ctrl+Alt+M**(변경 가능)으로 하단에 한 줄 바가 펼쳐진다.
+- **학급·번호·이름 동기화**: 셋 중 하나만 입력/선택하면 나머지가 **등록 명단 기준으로 자동 완성**된다.
+  동명이인 등 모호하면 드롭다운으로 고르고, 새 학생은 직접 입력해 추가한다.
+- **명단 직접 반영**: 저장(**Ctrl+S**)하면 해당 영역 학급 시트에 바로 기록된다 —
+  기존 학생이면 내용에 **이어붙이고**, 없으면 **행을 삽입**한다.
+  등록되지 않은 학급은 만들지 않아(고아 방지) 안전하다.
+
 ## 프라이버시 (무엇이 인터넷을 쓰나)
 - **오프라인(기본)**: 문장 생성·변형·학습·형태소 점검·규정 검사 — 학생 데이터는 PC를 벗어나지 않는다.
 - **온라인(선택)**: ① 최초 1회 모델 내려받기(HuggingFace) ② **맞춤법 검사**를 정확히 하려면
@@ -54,7 +69,8 @@ teaveloper 오프라인 앱 · Windows `.exe` 배포.
 ```bash
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python run.py
+.venv/bin/python run.py                 # 메인 앱
+.venv/bin/python quicknote.py           # (선택) 수업 메모 도구 — 트레이 상주
 ```
 최초 실행 시 상단 배너의 **모델 내려받기** 버튼으로 GGUF(약 4.7GB)를 받는다.
 (또는 직접 받아 사용자 데이터 폴더의 `models/` 에 둔다.)
@@ -82,9 +98,12 @@ train/merge_lora.py      LoRA 병합 후 GGUF 양자화(q4_k_m)
 ```powershell
 python -m pip install -r requirements.txt pyinstaller
 pyinstaller build/saenggibu.spec --noconfirm
-# 산출물: dist/생기부도우미/생기부도우미.exe
 ```
-- 앱 아이콘: `app/assets/app.ico`(teaveloper 죽방 엠블럼 + 말풍선). 스펙의 `icon=` 에 지정됨.
+- 산출물: `dist/생기부도우미/` 아래 **두 개의 exe**
+  - `생기부도우미.exe` — 메인 앱(아이콘 클릭 실행)
+  - `수업메모.exe` — 트레이 메모 도구(최초 실행 시 시작 프로그램 자동 등록)
+  - 공통 라이브러리는 스펙의 `MERGE`로 공유해 용량 중복을 없앤다.
+- 앱 아이콘: 메인 `app/assets/app.ico`, 메모 `app/assets/memo.ico`(브랜드 구분). 스펙의 `icon=` 에 지정됨.
 - GGUF 모델은 용량이 커서 exe에 포함하지 않는다. 다음 중 하나로 제공한다.
   1. 산출물 폴더 옆 `models/` 에 GGUF를 넣어 배포(오프라인 즉시 사용)
   2. 그대로 배포 → 교사 PC 최초 실행 시 앱이 내려받기
@@ -111,11 +130,14 @@ app/
   memory_store.py  SQLite 예시 저장 + BM25 few-shot 검색(학습)
   downloader.py    최초 1회 모델 다운로드(이어받기)
   importer.py      엑셀/CSV 학급 명단 가져오기
+  roster_data.py   학급 명단 읽기/기록(메모 도구 동기화·행 삽입)
+  autostart.py     메모 도구 Windows 시작 프로그램 등록/해제
   ui/              PySide6 메인창·영역 탭·학급 시트·워커 스레드
+  ui/quicknote.py  수업 메모 도구(트레이 상주·팝업·전역 단축키)
 assets/seed_corpus.jsonl   내장 씨드 코퍼스(문장 '형식' 학습용)
-build/saenggibu.spec       PyInstaller 스펙
-train/                     SFT·DPO 파인튜닝 파이프라인
-scripts/                   코퍼스·생성 품질 평가 스크립트
+build/saenggibu.spec       PyInstaller 스펙(메인·메모 두 exe)
+train/                     SFT·DPO 파인튜닝 파이프라인 (학습 데이터는 비공개)
+run.py / quicknote.py      메인 앱 / 메모 도구 진입점
 ```
 
 ## 주의 / 면책
