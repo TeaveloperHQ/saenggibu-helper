@@ -43,6 +43,41 @@ if (args.Length > 0 && args[0] == "ptest")
     return 0;
 }
 
+// 서브커맨드: bench <modelPath> — 결정적 핫패스 처리량 측정(C# vs Python)
+if (args.Length > 0 && args[0] == "bench")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    using var kiwi = new Cli.KiwiNative(args[1]);
+    var sents = new[]
+    {
+        "맡은 역할을 성실히 수행하며 책임감을 보임", "실험을 설계하고 결과를 분석함",
+        "친구를 도와 문제를 해결함", "논리적 사고력을 보임",
+        "자료를 정리하고 방법을 설명하며 의견을 제시함", "탐구하는 태도를 지님",
+    };
+    var sw = new System.Diagnostics.Stopwatch();
+
+    // 1) BM25 tokenize (순수 관리형)
+    int nTok = 200_000; sw.Restart();
+    long acc = 0;
+    for (int i = 0; i < nTok; i++) acc += Tokenizer.Tokenize(sents[i % sents.Length]).Count;
+    sw.Stop();
+    Console.WriteLine($"BM25.tokenize\t{(nTok / sw.Elapsed.TotalSeconds).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} ops/s");
+
+    // 2) kiwi tokenize (네이티브 P/Invoke)
+    int nKiwi = 5_000; sw.Restart();
+    for (int i = 0; i < nKiwi; i++) kiwi.Tokenize(sents[i % sents.Length]);
+    sw.Stop();
+    Console.WriteLine($"kiwi.tokenize\t{(nKiwi / sw.Elapsed.TotalSeconds).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} ops/s");
+
+    // 3) _sentence_variants (변형 원자, kiwi+rng+join)
+    int nSv = 2_000; sw.Restart();
+    for (int i = 0; i < nSv; i++)
+        Paraphrase.SentenceVariants(sents[i % sents.Length], 6, new PyRandom(42), true, kiwi);
+    sw.Stop();
+    Console.WriteLine($"sentence_variants\t{(nSv / sw.Elapsed.TotalSeconds).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} ops/s");
+    return 0;
+}
+
 // 서브커맨드: svtest <modelPath> <sent> <k> <adv0|1> — _sentence_variants 파리티
 if (args.Length > 0 && args[0] == "svtest")
 {
