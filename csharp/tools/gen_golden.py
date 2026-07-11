@@ -17,6 +17,8 @@ sys.path.insert(0, str(REPO))
 
 from app.memory_store import (Example, _bm25_scores, _boost_subject,  # noqa: E402
                               tokenize)
+from app.paraphrase import (_bigrams, _clean_line, _fix_spacing,  # noqa: E402
+                            _is_eval_sent, _too_similar)
 from app.patterns import classify  # noqa: E402
 from app.postprocess import nominalize_sentence, to_nominal_endings  # noqa: E402
 from app.prompts import AREA_BY_KEY, AREAS, build_user_prompt  # noqa: E402
@@ -110,6 +112,27 @@ BM25_CASES = [
 ]
 
 
+FIX_SPACING_IN = [
+    "1 인 1 역을 맡음", "2 학기 발표", "이끌어 냄", "들어 감",
+    "가지고 1인1역", "3 회 실험 진행", "생각해 봄",
+]
+CLEAN_LINE_IN = [
+    "1) 첫 변형 / 두번째 절.", "- 불릿 문장", "  \"따옴표 문장\"  ",
+    "3. 번호 문장 / 나눔 표현", "•블릿 없는 것", "[2] 대괄호 번호",
+]
+IS_EVAL_SENT_IN = [
+    "논리적 사고력을 보임", "실험을 설계함", "리더십을 발휘함",
+    "책임감이 강함", "발표를 함", "성실한 태도가 돋보임",
+]
+TOO_SIMILAR_PAIRS = [
+    ("맡은 역할을 성실히 수행함", "맡은 역할을 수행함"),
+    ("탐구하는 태도를 보임", "전혀 다른 내용의 문장임"),
+    ("", ""),
+    ("같은 문장", "같은 문장"),
+]
+BIGRAMS_IN = ["가나다라", "ab cd", "한", "실험 설계"]
+
+
 def system_cases():
     return [{"area": a.key, "out": a.system_prompt()} for a in AREAS]
 
@@ -148,6 +171,11 @@ def main() -> int:
         ],
         "system_prompt": system_cases(),
         "build_user_prompt": user_cases(),
+        "fix_spacing": [{"in": s, "out": _fix_spacing(s)} for s in FIX_SPACING_IN],
+        "clean_line": [{"in": s, "out": _clean_line(s)} for s in CLEAN_LINE_IN],
+        "is_eval_sent": [{"in": s, "out": _is_eval_sent(s)} for s in IS_EVAL_SENT_IN],
+        "too_similar": [{"a": a, "b": b, "out": _too_similar(a, b)} for a, b in TOO_SIMILAR_PAIRS],
+        "bigrams": [{"in": s, "out": sorted(_bigrams(s))} for s in BIGRAMS_IN],
     }
     dest = REPO / "csharp" / "golden" / "golden.json"
     dest.parent.mkdir(parents=True, exist_ok=True)

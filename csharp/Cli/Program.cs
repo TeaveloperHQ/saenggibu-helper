@@ -108,6 +108,29 @@ foreach (var (c, i) in Iter("build_user_prompt"))
           $"{J(c.GetProperty("area"))} n={c.GetProperty("n").GetInt32()}");
 }
 
+// ── paraphrase(순수 헬퍼) ──────────────────────────────────────────────
+foreach (var (c, i) in Iter("fix_spacing"))
+    Check("fix_spacing", i, J(c.GetProperty("out")),
+          Paraphrase.FixSpacing(J(c.GetProperty("in"))), J(c.GetProperty("in")));
+
+foreach (var (c, i) in Iter("clean_line"))
+    Check("clean_line", i, J(c.GetProperty("out")),
+          Paraphrase.CleanLine(J(c.GetProperty("in"))), J(c.GetProperty("in")));
+
+foreach (var (c, i) in Iter("is_eval_sent"))
+    Check("is_eval_sent", i, c.GetProperty("out").GetBoolean().ToString(),
+          Paraphrase.IsEvalSent(J(c.GetProperty("in"))).ToString(), J(c.GetProperty("in")));
+
+foreach (var (c, i) in Iter("too_similar"))
+    Check("too_similar", i, c.GetProperty("out").GetBoolean().ToString(),
+          Paraphrase.TooSimilar(J(c.GetProperty("a")), J(c.GetProperty("b"))).ToString(),
+          $"{J(c.GetProperty("a"))} vs {J(c.GetProperty("b"))}");
+
+foreach (var (c, i) in Iter("bigrams"))
+    Check("bigrams", i, string.Join(",", JArr(c.GetProperty("out"))),
+          string.Join(",", Paraphrase.Bigrams(J(c.GetProperty("in"))).OrderBy(x => x, StringComparer.Ordinal)),
+          J(c.GetProperty("in")));
+
 // ── retrieve(SQLite end-to-end) ────────────────────────────────────────
 string retrPath = Path.Combine(Path.GetDirectoryName(goldenPath)!, "golden_retrieve.json");
 if (File.Exists(retrPath))
