@@ -1,0 +1,7 @@
+# 생기부 도우미 — 런타임 의존성 (Python 3.12 권장)
+# llama-cpp-python: CPU 전용 GGUF 추론. Windows/Linux 모두 사전 빌드 휠 제공.
+llama-cpp-python>=0.3.2
+# 데스크톱 GUI
+PySide6>=6.7,<6.9
+openpyxl>=3.1
+kiwipiepy>=0.17

@@ -1,0 +1,51 @@
+# === 언어 모델(대용량 GGUF) ===
+# 앱이 최초 실행 시 HuggingFace에서 자동 다운로드하므로 저장소에 포함하지 않는다.
+models/
+*.gguf
+*.part
+*.bin
+*.safetensors
+
+# === 학습 데이터(파인튜닝 코퍼스) — 소유자 자산, 저장소 제외 ===
+# seed_corpus.jsonl(런타임 few-shot)은 앱 동작에 필요하므로 제외하지 않는다.
+/train/data/
+
+# === 가상환경 ===
+.venv/
+venv/
+env/
+
+# === 파이썬 캐시 ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# === PyInstaller 산출물(스펙 파일은 유지) ===
+/dist/
+/build/build/
+/build/dist/
+/build/*
+!/build/saenggibu.spec
+
+# === 백업·임시·로그 ===
+*.bak
+*.spec.bak
+*.log
+*.tmp
+*.orig
+
+# === 로컬 사용자 데이터(프로젝트 폴더에 생기면 제외) ===
+*.sqlite3
+roster_*.json
+settings.json
+
+# === OS / 에디터 ===
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
