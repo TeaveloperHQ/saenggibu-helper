@@ -13,6 +13,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Saenggibu;
 
@@ -57,6 +58,7 @@ public class MainWindow : Window
         Title = "생기부 도우미";
         Width = 1000; Height = 800;
         var ic = Asset("appicon.png"); if (ic != null) Icon = new WindowIcon(ic);
+        ApplyStyles();
 
         var header = new Border
         {
@@ -82,10 +84,32 @@ public class MainWindow : Window
 
     private static Control Docked(Control c, Dock d) { DockPanel.SetDock(c, d); return c; }
 
+    private void ApplyStyles()
+    {
+        Style St(Func<Selector?, Selector> sel, params (Avalonia.AvaloniaProperty p, object? v)[] setters)
+        {
+            var s = new Style(sel);
+            foreach (var (p, v) in setters) s.Setters.Add(new Setter(p, v));
+            return s;
+        }
+        const double H = 32.0;
+        Styles.Add(St(x => x.OfType<Button>(), (Button.MinHeightProperty, H), (Button.PaddingProperty, new Thickness(12, 4)),
+            (Button.VerticalAlignmentProperty, VerticalAlignment.Center), (Button.VerticalContentAlignmentProperty, VerticalAlignment.Center)));
+        Styles.Add(St(x => x.OfType<ComboBox>(), (ComboBox.MinHeightProperty, H), (ComboBox.VerticalAlignmentProperty, VerticalAlignment.Center)));
+        Styles.Add(St(x => x.OfType<AutoCompleteBox>(), (AutoCompleteBox.MinHeightProperty, H), (AutoCompleteBox.VerticalAlignmentProperty, VerticalAlignment.Center)));
+        Styles.Add(St(x => x.OfType<NumericUpDown>(), (NumericUpDown.MinHeightProperty, H), (NumericUpDown.VerticalAlignmentProperty, VerticalAlignment.Center)));
+        Styles.Add(St(x => x.OfType<TextBox>(), (TextBox.MinHeightProperty, H)));
+        Styles.Add(St(x => x.OfType<TextBox>().Class("multiline"), (TextBox.MinHeightProperty, 80.0)));
+        // 탭 스트립(영역/학급): 아이템을 탭처럼 여백
+        Styles.Add(St(x => x.OfType<ListBox>().Class("tabs").Descendant().OfType<ListBoxItem>(),
+            (ListBoxItem.PaddingProperty, new Thickness(12, 6)), (ListBoxItem.MarginProperty, new Thickness(0, 0, 3, 3))));
+    }
+
     // ── 생성 모드 = 영역 탭 + 입력/옵션/형태소/규정 + 체크박스 시트(파이썬 동일) ──
     private Control BuildGenerate()
     {
         var areaStrip = new ListBox { SelectionMode = SelectionMode.Single, Background = Brushes.Transparent };
+        areaStrip.Classes.Add("tabs");
         areaStrip.ItemsPanel = new FuncTemplate<Panel?>(() => new WrapPanel { Orientation = Orientation.Horizontal });
         foreach (var a in Prompts.Areas) areaStrip.Items.Add(a.Title);
         areaStrip.SelectedIndex = 0;
@@ -136,6 +160,7 @@ public class MainWindow : Window
 
         // 시트(학급 서브탭 + 체크박스 + 학번/이름/내용)
         var classStrip = new ListBox { SelectionMode = SelectionMode.Single, Background = Brushes.Transparent, MinWidth = 100 };
+        classStrip.Classes.Add("tabs");
         classStrip.ItemsPanel = new FuncTemplate<Panel?>(() => new WrapPanel { Orientation = Orientation.Horizontal });
         var newClass = new TextBox { Watermark = "새 학급", Width = 88 };
         var addClass = new Button { Content = "＋ 학급" };
