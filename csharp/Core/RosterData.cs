@@ -127,21 +127,26 @@ public static class RosterData
         { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
     }
 
-    /// <summary>확장 시트 읽기 — 첫 내용 열 라벨(contentLabel) + 추가 내용 열(ext) + 각 행의 추가 값.</summary>
-    public static (string contentLabel, List<(string id, string label)> extra,
+    /// <summary>확장 시트 읽기 — 코어 열 라벨(학번·이름·내용) + 추가 내용 열(ext) + 각 행의 추가 값.</summary>
+    public static (string numLabel, string nameLabel, string contentLabel, List<(string id, string label)> extra,
                    List<(string num, string name, string content, List<string> extraVals)> rows)
         ReadRowsExtended(string dir, string area, string klass)
     {
-        string contentLabel = "내용";
+        string numLabel = "학번", nameLabel = "이름", contentLabel = "내용";
         var extra = new List<(string, string)>();
         var outp = new List<(string, string, string, List<string>)>();
         var path = Path.Combine(dir, $"roster_{area}.json");
-        if (!File.Exists(path)) return (contentLabel, extra, outp);
+        if (!File.Exists(path)) return (numLabel, nameLabel, contentLabel, extra, outp);
         try
         {
             if (JsonNode.Parse(File.ReadAllText(path)) is JsonObject o && o[klass] is JsonObject e)
             {
                 if (e["headers"] is JsonArray hs && hs.Count > 0 && hs[0]?.GetValue<string>() is { Length: > 0 } h0) contentLabel = h0;
+                if (e["corehdr"] is JsonArray ch)
+                {
+                    if (ch.Count > 0 && ch[0]?.GetValue<string>() is { Length: > 0 } cn) numLabel = cn;
+                    if (ch.Count > 1 && ch[1]?.GetValue<string>() is { Length: > 0 } cm) nameLabel = cm;
+                }
                 if (e["ext"] is JsonArray ea)
                     foreach (var it in ea)
                         if (it is JsonObject eo)
@@ -161,11 +166,12 @@ public static class RosterData
             }
         }
         catch { }
-        return (contentLabel, extra, outp);
+        return (numLabel, nameLabel, contentLabel, extra, outp);
     }
 
-    /// <summary>확장 시트 저장 — 학번·이름 + 내용 열들(contentLabel 첫 열) + 각 행 값. 완전 빈 행 제외.</summary>
-    public static void WriteRowsExtended(string dir, string area, string klass, string contentLabel,
+    /// <summary>확장 시트 저장 — 코어 열 라벨(학번·이름·내용) + 추가 내용 열 + 각 행 값. 완전 빈 행 제외.</summary>
+    public static void WriteRowsExtended(string dir, string area, string klass,
+        string numLabel, string nameLabel, string contentLabel,
         IReadOnlyList<(string id, string label)> extra,
         IEnumerable<(string num, string name, string content, IReadOnlyList<string> extraVals)> rows)
     {
@@ -185,7 +191,12 @@ public static class RosterData
         }
         var ext = new JsonArray();
         foreach (var (id, label) in extra) ext.Add(new JsonObject { ["id"] = id, ["label"] = label });
-        data[klass] = new JsonObject { ["headers"] = new JsonArray(string.IsNullOrEmpty(contentLabel) ? "내용" : contentLabel), ["ext"] = ext, ["rows"] = arr };
+        data[klass] = new JsonObject
+        {
+            ["headers"] = new JsonArray(string.IsNullOrEmpty(contentLabel) ? "내용" : contentLabel),
+            ["corehdr"] = new JsonArray(string.IsNullOrEmpty(numLabel) ? "학번" : numLabel, string.IsNullOrEmpty(nameLabel) ? "이름" : nameLabel),
+            ["ext"] = ext, ["rows"] = arr,
+        };
         File.WriteAllText(path, data.ToJsonString(new JsonSerializerOptions
         { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
     }

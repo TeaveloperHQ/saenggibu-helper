@@ -85,6 +85,18 @@ public static class Importer
         wb.SaveAs(path);
     }
 
+    /// <summary>엑셀 전체 구성 내보내기 — 헤더 + 모든 열. (학번·이름·내용·추가 열)</summary>
+    public static void WriteXlsxFull(string path, IReadOnlyList<string> headers, IEnumerable<IReadOnlyList<string>> rows)
+    {
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet("명단");
+        for (int c = 0; c < headers.Count; c++) ws.Cell(1, c + 1).Value = headers[c];
+        int r = 2;
+        foreach (var row in rows) { for (int c = 0; c < row.Count; c++) ws.Cell(r, c + 1).Value = row[c]; r++; }
+        ws.Columns().AdjustToContents();
+        wb.SaveAs(path);
+    }
+
     private static readonly string[] ContentHdr =
         { "특기사항", "세부능력", "행동특성", "종합의견", "내용", "기재", "특기", "의견" };
 
@@ -102,6 +114,44 @@ public static class Importer
     }
 
     /// <summary>app/importer.py parse_xlsx — 엑셀에서 생기부 본문 열을 휴리스틱으로 추출.</summary>
+    private static readonly HashSet<string> KnownHeaders = new() { "학번", "번호", "이름", "성명", "내용" };
+    private static readonly string[] HeaderKeywords =
+        { "학번", "번호", "이름", "성명", "내용", "특기", "특성", "의견", "세부능력", "행동", "기재" };
+
+    /// <summary>엑셀 전체 구성 읽기 — 헤더(있으면) + 모든 열의 각 행 값. 완전 빈 행 제외.</summary>
+    public static (List<string> headers, List<List<string>> rows) ParseXlsxFull(string path)
+    {
+        var headers = new List<string>();
+        var outRows = new List<List<string>>();
+        using var wb = new XLWorkbook(path);
+        var ws = wb.Worksheets.FirstOrDefault(w => w.RangeUsed() != null);
+        if (ws == null) return (headers, outRows);
+        var rows = ws.RangeUsed()!.Rows().ToList();
+        if (rows.Count == 0) return (headers, outRows);
+        int ncol = rows.Max(r => r.CellCount());
+        string Cell(int r, int c) => c < rows[r].CellCount() ? (rows[r].Cell(c + 1).GetString() ?? "").Trim() : "";
+
+        var first = Enumerable.Range(0, ncol).Select(c => Cell(0, c)).ToList();
+        // 헤더 판정: (1) 알려진/흔한 헤더 키워드 포함, 또는 (2) 첫 열이 데이터에선 숫자(학번)인데 첫 행만 비숫자.
+        bool anyKnown = first.Any(h => HeaderKeywords.Any(k => h.Contains(k, StringComparison.Ordinal)));
+        bool numericId = false;
+        if (rows.Count >= 2 && ncol > 0 && first[0].Length > 0 && !first[0].All(char.IsDigit))
+        {
+            int tot = 0, num = 0;
+            for (int r = 1; r < rows.Count; r++) { var v = Cell(r, 0); if (v.Length > 0) { tot++; if (v.All(char.IsDigit)) num++; } }
+            numericId = tot > 0 && num >= tot * 0.6;
+        }
+        bool hasHeader = anyKnown || numericId;
+        int start = hasHeader ? 1 : 0;
+        headers = hasHeader ? first : Enumerable.Repeat("", ncol).ToList();
+        for (int r = start; r < rows.Count; r++)
+        {
+            var row = Enumerable.Range(0, ncol).Select(c => Cell(r, c)).ToList();
+            if (row.Any(v => v.Length > 0)) outRows.Add(row);
+        }
+        return (headers, outRows);
+    }
+
     public static List<string> ParseXlsx(string path, int minLen = 5)
     {
         var records = new List<string>();

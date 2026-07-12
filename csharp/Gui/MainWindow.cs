@@ -90,11 +90,39 @@ public class MainWindow : Window
         var tabs = new TabControl { Margin = new Thickness(6, 4, 6, 6) };
         tabs.Items.Add(new TabItem { Header = IconText("edit", "생성 모드"), Content = BuildGenerate() });
         tabs.Items.Add(new TabItem { Header = IconText("book", "학습 모드"), Content = BuildLearn() });
+        tabs.Items.Add(new TabItem { Header = IconText("clipboard", "메모"), Content = BuildMemo() });
         tabs.Items.Add(new TabItem { Header = IconText("steps", "과정 안내"), Content = BuildProcess() });
         Content = new DockPanel { Children = { Docked(header, Dock.Top), tabs } };
     }
 
     private static Control Docked(Control c, Dock d) { DockPanel.SetDock(c, d); return c; }
+
+    // 예/아니오 확인 대화상자(모달). true=확인, false=취소.
+    private async Task<bool> ConfirmAsync(string title, string message, string okText, string cancelText)
+    {
+        var tcs = new TaskCompletionSource<bool>();
+        var ok = new Button { Content = okText, Background = Brush.Parse("#4f46e5"), Foreground = Brushes.White, MinWidth = 120 };
+        var cancel = new Button { Content = cancelText, MinWidth = 80 };
+        var dlg = new Window
+        {
+            Title = title, Width = 420, SizeToContent = SizeToContent.Height, CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(18), Spacing = 14,
+                Children =
+                {
+                    new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                    new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Children = { cancel, ok } },
+                },
+            },
+        };
+        ok.Click += (_, _) => { tcs.TrySetResult(true); dlg.Close(); };
+        cancel.Click += (_, _) => { tcs.TrySetResult(false); dlg.Close(); };
+        dlg.Closed += (_, _) => tcs.TrySetResult(false);
+        await dlg.ShowDialog(this);
+        return await tcs.Task;
+    }
 
     // 아이콘 + 텍스트(파이썬 버튼/탭 아이콘과 동일한 SVG 라인 아이콘)
     private static Control IconText(string icon, string text, double size = 16, string color = SgbIcon.Accent) =>
@@ -139,12 +167,16 @@ public class MainWindow : Window
             (DataGridColumnHeader.FontWeightProperty, FontWeight.SemiBold),
             (DataGridColumnHeader.HorizontalContentAlignmentProperty, HorizontalAlignment.Center),
             (DataGridColumnHeader.VerticalContentAlignmentProperty, VerticalAlignment.Center),
-            (DataGridColumnHeader.PaddingProperty, new Thickness(6, 0)),
+            (DataGridColumnHeader.PaddingProperty, new Thickness(3, 1)),
+            (DataGridColumnHeader.MinHeightProperty, 24.0),
             (DataGridColumnHeader.ClipToBoundsProperty, false),
             (DataGridColumnHeader.SeparatorBrushProperty, Brush.Parse("#c8ccd2"))));
         // 헤더 안 TextBlock: 잘림 방지 + 세로 중앙(테마 기본 clip으로 글자 하단이 잘리던 문제)
         Styles.Add(St(x => x.OfType<DataGridColumnHeader>().Descendant().OfType<TextBlock>(),
             (TextBlock.TextTrimmingProperty, TextTrimming.None), (TextBlock.MarginProperty, new Thickness(0)),
+            (TextBlock.TextWrappingProperty, TextWrapping.Wrap),                         // 긴 머리글 잘림 방지(줄바꿈)
+            (TextBlock.TextAlignmentProperty, TextAlignment.Center),                     // 전부 가운데 정렬
+            (TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center),
             (TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center)));
         Styles.Add(St(x => x.OfType<DataGridCell>(), (DataGridCell.PaddingProperty, new Thickness(4, 0)),
             (DataGridCell.MinHeightProperty, 0.0),
@@ -228,7 +260,7 @@ public class MainWindow : Window
             ItemsSource = rows, AutoGenerateColumns = false, IsReadOnly = false,
             GridLinesVisibility = DataGridGridLinesVisibility.All,
             HeadersVisibility = DataGridHeadersVisibility.All,   // 열 + 행 머리글(엑셀식)
-            RowHeaderWidth = 34, ColumnHeaderHeight = 32,   // RowHeight 미지정 = 내용 맞춤 자동 높이(엑셀식 줄바꿈+autofit)
+            RowHeaderWidth = 34,   // RowHeight·ColumnHeaderHeight 미지정 = 내용 맞춤 자동 높이(머리글 줄바꿈 시 늘어남)
             CanUserResizeColumns = true, CanUserSortColumns = false,
             ClipboardCopyMode = DataGridClipboardCopyMode.IncludeHeader,   // Ctrl+C 복사
             SelectionMode = DataGridSelectionMode.Extended,
@@ -269,9 +301,9 @@ public class MainWindow : Window
         // 파이썬 class_tab.py 구조: 학번·이름 = 고정(FIXED=2), 그 뒤 '내용' 열들(첫 내용 열 = Content)
         const int Fixed = 2;        // 학번·이름 (삭제 불가)
         const int CoreCols = 3;     // 학번·이름·내용(첫 content 열) — 그리드 인덱스 0,1,2
-        string contentLabel = "내용";
-        grid.Columns.Add(Col("학번", "Num", new DataGridLength(68)));
-        grid.Columns.Add(Col("이름", "Name", new DataGridLength(90)));
+        string numLabel = "학번", nameLabel = "이름", contentLabel = "내용";
+        grid.Columns.Add(Col(numLabel, "Num", new DataGridLength(68)));
+        grid.Columns.Add(Col(nameLabel, "Name", new DataGridLength(90)));
         grid.Columns.Add(Col(contentLabel, "Content", new DataGridLength(420), wrap: true));   // 고정 폭 → 엑셀식 가로 스크롤(Star는 스크롤 이상)
         var extraCols = new List<(string id, string label)>();
         int extraSeq = 0;
@@ -302,7 +334,11 @@ public class MainWindow : Window
         // 머리글 구분선까지 강조색 연결 — HeaderCell이 internal이라 비주얼 트리에서 헤더를 찾아 보이는 열 순서로 매핑
         void ApplyHeaderMarkers()
         {
-            var headers = grid.GetVisualDescendants().OfType<DataGridColumnHeader>().ToList();
+            // filler 헤더(Content null) 제외 + 실제 X좌표로 좌→우 정렬 → 보이는 열 순서와 정확히 매핑
+            var headers = grid.GetVisualDescendants().OfType<DataGridColumnHeader>()
+                .Where(h => h.Content != null)
+                .Select(h => (h, x: h.TranslatePoint(new Point(0, 0), grid)?.X ?? double.MaxValue))
+                .OrderBy(t => t.x).Select(t => t.h).ToList();
             var vis = grid.Columns.Where(c => c.IsVisible).ToList();
             foreach (var h in headers) h.SeparatorBrush = Brush.Parse("#c8ccd2");
             for (int k = 0; k < headers.Count && k < vis.Count; k++)
@@ -323,16 +359,16 @@ public class MainWindow : Window
         void RebuildExtraColumns()   // 첫 content 열(내용) 뒤 추가 content 열 재구성
         {
             while (grid.Columns.Count > CoreCols) grid.Columns.RemoveAt(grid.Columns.Count - 1);
-            foreach (var (id, label) in extraCols) grid.Columns.Add(Col(label, $"[{id}]", new DataGridLength(160)));
+            foreach (var (id, label) in extraCols) grid.Columns.Add(Col(label, $"[{id}]", new DataGridLength(200), wrap: true));   // 추가 내용 열도 줄바꿈+행높이 autofit
             RefreshColCombo(false); UpdateHideMarkers();
         }
         void LoadRows()
         {
-            rows.Clear(); extraCols.Clear(); contentLabel = "내용";
+            rows.Clear(); extraCols.Clear(); numLabel = "학번"; nameLabel = "이름"; contentLabel = "내용";
             if (CurClass() is { Length: > 0 } cc && cc != "＋")
             {
-                var (clbl, ext, rr) = RosterData.ReadRowsExtended(_dataDir, Area().Key, cc);
-                contentLabel = clbl; extraCols.AddRange(ext);
+                var (nlbl, mlbl, clbl, ext, rr) = RosterData.ReadRowsExtended(_dataDir, Area().Key, cc);
+                numLabel = nlbl; nameLabel = mlbl; contentLabel = clbl; extraCols.AddRange(ext);
                 foreach (var (nu, na, co, ev) in rr)
                 {
                     var vm = new RowVm { Num = nu, Name = na, Content = co };
@@ -341,7 +377,7 @@ public class MainWindow : Window
                 }
             }
             for (int i = rows.Count; i < 50; i++) rows.Add(new RowVm());   // 기본 50행(학급 25명+ 여유)
-            grid.Columns[2].Header = contentLabel;
+            grid.Columns[0].Header = numLabel; grid.Columns[1].Header = nameLabel; grid.Columns[2].Header = contentLabel;
             RebuildExtraColumns();
             RefreshColCombo(true);   // 로드 시 기본 = 내용 가장 많은 열
             // 저장된 보기 상태(열 고정·숨김·너비·행높이) 복원
@@ -450,7 +486,7 @@ public class MainWindow : Window
         saveSheet.Click += (_, _) =>
         {
             string k = CurClass(); if (k.Length == 0 || k == "＋") { sheetMsg.Text = "저장할 학급 탭을 선택하세요(없으면 ＋ 로 추가)."; return; }
-            RosterData.WriteRowsExtended(_dataDir, Area().Key, k, contentLabel, extraCols,
+            RosterData.WriteRowsExtended(_dataDir, Area().Key, k, numLabel, nameLabel, contentLabel, extraCols,
                 rows.Select(r => (r.Num, r.Name, r.Content, (IReadOnlyList<string>)extraCols.Select(c => r[c.id]).ToList())));
             SaveView();   // 열 고정·숨김·너비·행높이도 함께 저장
             int learned = 0; foreach (var r in rows) if (r.Content.Trim().Length > 0) { _store.AddExample(Area().Key, subject.IsVisible ? (subject.Text ?? "").Trim() : "", r.Name, r.Content); learned++; }
@@ -458,9 +494,61 @@ public class MainWindow : Window
             if (_learnStatus != null) _learnStatus.Text = $"학습 예시: 총 {_store.Count()}건";
         };
         var importX = new Button { Content = IconText("import", "엑셀 불러오기") };
-        importX.Click += async (_, _) => { var f = (await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { AllowMultiple = false }))?.FirstOrDefault(); if (f == null) return; try { rows.Clear(); foreach (var r in Importer.ParseXlsx(f.Path.LocalPath)) rows.Add(new RowVm { Content = r }); sheetMsg.Text = "엑셀 본문 추출됨."; } catch (Exception ex) { sheetMsg.Text = "오류:" + ex.Message; } };
+        importX.Click += async (_, _) =>
+        {
+            var f = (await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { AllowMultiple = false }))?.FirstOrDefault();
+            if (f == null) return;
+            try
+            {
+                var (hdrs, xrows) = Importer.ParseXlsxFull(f.Path.LocalPath);   // 엑셀 = 새 시트로 통째 이식
+                if (xrows.Count == 0) { sheetMsg.Text = "빈 엑셀입니다."; return; }
+                // 시트에 내용이 있으면: 지우고 새로 만들지 / 취소
+                bool hasData = rows.Any(r => r.Num.Length + r.Name.Length + r.Content.Length > 0 || extraCols.Any(c => r[c.id].Length > 0));
+                if (hasData && !await ConfirmAsync("엑셀 불러오기", "현재 시트에 내용이 있습니다. 지우고 엑셀로 새 시트를 만들까요?", "지우고 새로 만들기", "취소"))
+                { sheetMsg.Text = "취소됨."; return; }
+
+                int ncol = Math.Max(hdrs.Count, xrows.Max(r => r.Count));
+                while (hdrs.Count < ncol) hdrs.Add("");
+                bool hasHeader = hdrs.Any(h => h.Length > 0);
+                // 기존 열 레이블 제거 → 엑셀 열 레이블 그대로 이식(헤더 없으면 열1·열2…). 열은 최소 3개.
+                string Lbl(int c) => hasHeader ? (c < hdrs.Count && hdrs[c].Length > 0 ? hdrs[c] : $"열{c + 1}") : (c == 0 ? "학번" : c == 1 ? "이름" : c == 2 ? "내용" : $"내용{c - 1}");
+                rows.Clear(); extraCols.Clear();
+                numLabel = Lbl(0); nameLabel = Lbl(1); contentLabel = Lbl(2);
+                for (int c = 3; c < ncol; c++) { extraSeq++; extraCols.Add(("c" + extraSeq, Lbl(c))); }
+                foreach (var xr in xrows)
+                {
+                    string Cell(int c) => c < xr.Count ? xr[c] : "";
+                    var vm = new RowVm { Num = Cell(0), Name = Cell(1), Content = Cell(2) };
+                    for (int c = 3; c < ncol; c++) vm.Extra[extraCols[c - 3].id] = Cell(c);
+                    rows.Add(vm);
+                }
+                for (int i = rows.Count; i < 50; i++) rows.Add(new RowVm());
+                // 새 시트 → 보기 상태 초기화(고정·숨김·행높이) → 줄바꿈+행높이 autofit 그대로
+                rowHeights.Clear(); grid.FrozenColumnCount = 0;
+                grid.Columns[0].Header = numLabel; grid.Columns[1].Header = nameLabel; grid.Columns[2].Header = contentLabel;
+                foreach (var c in grid.Columns) c.IsVisible = true;
+                RebuildExtraColumns();
+                grid.ItemsSource = null; grid.ItemsSource = rows;
+                sheetMsg.Text = $"엑셀 불러옴 — {xrows.Count}행 · {ncol}열(엑셀 레이블 그대로).";
+            }
+            catch (Exception ex) { sheetMsg.Text = "오류:" + ex.Message; }
+        };
         var exportX = new Button { Content = IconText("export", "엑셀 내보내기") };
-        exportX.Click += async (_, _) => { var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { SuggestedFileName = "명단.xlsx", DefaultExtension = "xlsx" }); if (f == null) return; try { Importer.WriteXlsx(f.Path.LocalPath, rows.Select(r => (r.Num, r.Name, r.Content))); sheetMsg.Text = "내보냄: " + f.Name; } catch (Exception ex) { sheetMsg.Text = "오류:" + ex.Message; } };
+        exportX.Click += async (_, _) =>
+        {
+            var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { SuggestedFileName = "명단.xlsx", DefaultExtension = "xlsx" });
+            if (f == null) return;
+            try
+            {
+                var headers = new List<string> { numLabel, nameLabel, contentLabel };
+                headers.AddRange(extraCols.Select(c => c.label));
+                var outRows = rows.Where(r => r.Num.Length + r.Name.Length + r.Content.Length > 0 || extraCols.Any(c => r[c.id].Length > 0))
+                    .Select(r => { var l = new List<string> { r.Num, r.Name, r.Content }; l.AddRange(extraCols.Select(c => r[c.id])); return (IReadOnlyList<string>)l; });
+                Importer.WriteXlsxFull(f.Path.LocalPath, headers, outRows);
+                sheetMsg.Text = "내보냄: " + f.Name;
+            }
+            catch (Exception ex) { sheetMsg.Text = "오류:" + ex.Message; }
+        };
 
         // ── 우클릭 메뉴(파이썬 class_tab.py 기준): 열머리글 / 행머리글 / 셀 로 분리 ──
         string GetCell(RowVm r, int di) => di == 0 ? r.Num : di == 1 ? r.Name : di == 2 ? r.Content : ((di - CoreCols) is var e2 && e2 >= 0 && e2 < extraCols.Count ? r[extraCols[e2].id] : "");
@@ -499,7 +587,7 @@ public class MainWindow : Window
             ShowPrompt(grid, cur, "열 이름 변경", nn =>
             {
                 grid.Columns[di].Header = nn;
-                if (di == 2) contentLabel = nn;
+                if (di == 0) numLabel = nn; else if (di == 1) nameLabel = nn; else if (di == 2) contentLabel = nn;
                 else if (di >= CoreCols) { int ei = di - CoreCols; if (ei >= 0 && ei < extraCols.Count) extraCols[ei] = (extraCols[ei].id, nn); }
                 RefreshColCombo(false);
             });
@@ -701,12 +789,12 @@ public class MainWindow : Window
         {
             string area = Area().Key, cur = CurClass();
             if (cur.Length > 0 && cur != "＋")   // 현재 시트 미저장 편집 보존
-                RosterData.WriteRowsExtended(_dataDir, area, cur, contentLabel, extraCols,
+                RosterData.WriteRowsExtended(_dataDir, area, cur, numLabel, nameLabel, contentLabel, extraCols,
                     rows.Select(r => (r.Num, r.Name, r.Content, (IReadOnlyList<string>)extraCols.Select(c => r[c.id]).ToList())));
             int n = 0;
             foreach (var klass in RosterData.ClassNames(_dataDir, area))
             {
-                var (clbl, ext, rr) = RosterData.ReadRowsExtended(_dataDir, area, klass);
+                var (nl, ml, clbl, ext, rr) = RosterData.ReadRowsExtended(_dataDir, area, klass);
                 int changed = 0;
                 var newRows = new List<(string, string, string, IReadOnlyList<string>)>();
                 foreach (var (num, name, content, ev) in rr)
@@ -716,7 +804,7 @@ public class MainWindow : Window
                     foreach (var v in ev) { changed += CountOccur(v, find); ev2.Add(v.Replace(find, repl)); }
                     newRows.Add((num, name, content.Replace(find, repl), (IReadOnlyList<string>)ev2));
                 }
-                if (changed > 0) { RosterData.WriteRowsExtended(_dataDir, area, klass, clbl, ext, newRows); n += changed; }
+                if (changed > 0) { RosterData.WriteRowsExtended(_dataDir, area, klass, nl, ml, clbl, ext, newRows); n += changed; }
             }
             if (n > 0) LoadRows();   // 현재 시트 새로고침
             return n;
@@ -886,6 +974,78 @@ public class MainWindow : Window
             _learnStatus, HRow(backup, restore),
             new TextBlock { Text = "등록 용어(변형 시 철자 보존)", FontWeight = FontWeight.Bold, Margin = new Thickness(0,8,0,0) },
             list, HRow(edit, add, del), status }));
+    }
+
+    // ── 메모 탭 = 수업 메모 도구 설정(자동 실행 + 팝업 단축키) ──
+    private Control BuildMemo()
+    {
+        var status = new TextBlock { Foreground = Brushes.Gray, TextWrapping = TextWrapping.Wrap };
+
+        var chk = new CheckBox { Content = "부팅 시 수업 메모 도구 자동 실행" };
+        if (!OperatingSystem.IsWindows()) chk.IsEnabled = false;
+        else
+        {
+            chk.IsChecked = Autostart.IsRegistered();
+            chk.IsCheckedChanged += (_, _) =>
+            {
+                if (!OperatingSystem.IsWindows()) return;
+                if (chk.IsChecked == true)
+                {
+                    var exe = Autostart.FindMemoExe();
+                    if (exe == null) { status.Text = "수업메모.exe를 찾을 수 없습니다(메인 앱과 같은 폴더 필요)."; chk.IsChecked = false; return; }
+                    Autostart.Register(exe); status.Text = "자동 실행 등록됨.";
+                }
+                else { Autostart.Unregister(); status.Text = "자동 실행 해제됨."; }
+            };
+        }
+
+        string hk = _settings.Get<string>("quicknote_hotkey") ?? "Ctrl+Alt+M";
+        var hkBtn = new Button { Content = hk, MinWidth = 150 };
+        bool capturing = false;
+        hkBtn.Click += (_, _) => { capturing = true; hkBtn.Content = "키 조합을 누르세요…"; hkBtn.Focus(); };
+        hkBtn.KeyDown += (_, e) =>
+        {
+            if (!capturing) return;
+            if (e.Key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin) return;
+            var combo = HotkeyString(e.KeyModifiers, e.Key);
+            if (combo != null) { hk = combo; _settings.Set("quicknote_hotkey", hk); status.Text = $"단축키 '{hk}' 저장됨 — 메모 도구 재시작 시 적용."; }
+            hkBtn.Content = hk; capturing = false; e.Handled = true;
+        };
+
+        var openBtn = new Button { Content = "지금 메모 열기" };
+        openBtn.Click += (_, _) =>
+        {
+            status.Text = Autostart.LaunchMemo(popup: true) ? "메모 도구를 실행했습니다." : "메모 실행 파일을 찾을 수 없습니다(Memo 프로젝트 빌드 필요).";
+        };
+
+        Control Row(params Control[] cs) { var p = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center }; foreach (var c in cs) p.Children.Add(c); return p; }
+        return Pad(new StackPanel { Spacing = 12 }.With(new Control[] {
+            new TextBlock { Text = "수업 메모 도구", FontSize = 16, FontWeight = FontWeight.Bold },
+            new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray, Text =
+                "트레이에 상주하며 수업 중 관찰을 팝업 단축키로 빠르게 학급 명단에 누적합니다(모델 불필요). 저장 시 기존 학생은 내용에 이어붙이고, 없으면 행을 삽입합니다." },
+            chk,
+            Row(new TextBlock { Text = "팝업 단축키", VerticalAlignment = VerticalAlignment.Center }, hkBtn, new TextBlock { Text = "(버튼 클릭 후 원하는 조합 누르기)", Foreground = Brushes.Gray, FontSize = 12, VerticalAlignment = VerticalAlignment.Center }),
+            openBtn,
+            OperatingSystem.IsWindows() ? new Panel() : new TextBlock { Text = "자동 실행·전역 단축키는 Windows에서 동작합니다.", Foreground = Brushes.Gray, FontSize = 12 },
+            status,
+        }));
+    }
+
+    // KeyModifiers+Key → "Ctrl+Alt+M" (조합키 최소 1 + 본키 필수). 지원 안 하면 null.
+    private static string? HotkeyString(KeyModifiers mods, Key key)
+    {
+        var parts = new System.Collections.Generic.List<string>();
+        if (mods.HasFlag(KeyModifiers.Control)) parts.Add("Ctrl");
+        if (mods.HasFlag(KeyModifiers.Alt)) parts.Add("Alt");
+        if (mods.HasFlag(KeyModifiers.Shift)) parts.Add("Shift");
+        if (mods.HasFlag(KeyModifiers.Meta)) parts.Add("Win");
+        string? k = null;
+        if (key >= Key.A && key <= Key.Z) k = key.ToString();
+        else if (key >= Key.D0 && key <= Key.D9) k = ((char)('0' + (key - Key.D0))).ToString();
+        else if (key >= Key.F1 && key <= Key.F12) k = key.ToString();
+        if (k == null || parts.Count == 0) return null;
+        parts.Add(k);
+        return string.Join("+", parts);
     }
 
     private Control BuildProcess() => Pad(new StackPanel { Spacing = 12 }.With(new Control[] {

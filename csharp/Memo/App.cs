@@ -7,6 +7,7 @@ using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 using System;
+using System.Linq;
 
 namespace Memo;
 
@@ -42,8 +43,12 @@ public class App : Application
             tray.Clicked += (_, _) => Show();
             TrayIcon.SetIcons(this, new TrayIcons { tray });
 
-            _hotkey = new WinHotkey(() => Dispatcher.UIThread.Post(Show));
+            var (mods, vk) = WinHotkey.Parse(ReadHotkeySetting());
+            _hotkey = new WinHotkey(() => Dispatcher.UIThread.Post(Show), mods, vk);
             _hotkey.Start();
+
+            if (desktop.Args?.Contains("--popup") == true)   // '지금 메모 열기'로 실행 시 즉시 팝업
+                Dispatcher.UIThread.Post(Show);
 
             // 메모 도구가 직접 실행되면 자기 자신을 자동시작 등록(상주 지속)
             if (Saenggibu.Autostart.IsSupported && OperatingSystem.IsWindows())
@@ -53,4 +58,17 @@ public class App : Application
     }
 
     private void Show() => _popup?.PopupBar();
+
+    private static string ReadHotkeySetting()
+    {
+        try
+        {
+            var env = Environment.GetEnvironmentVariable("SGB_DATA");
+            var dir = !string.IsNullOrEmpty(env) ? env
+                : System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    OperatingSystem.IsWindows() ? "SaenggibuHelper" : "saenggibu-helper");
+            return new Saenggibu.Settings(dir).Get<string>("quicknote_hotkey") ?? "Ctrl+Alt+M";
+        }
+        catch { return "Ctrl+Alt+M"; }
+    }
 }

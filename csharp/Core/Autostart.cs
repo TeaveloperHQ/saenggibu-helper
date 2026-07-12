@@ -17,7 +17,7 @@ public static class Autostart
 
     public static bool IsSupported => OperatingSystem.IsWindows();
 
-    /// <summary>메인 exe 옆에서 메모 exe를 찾는다(없으면 null).</summary>
+    /// <summary>메인 exe 옆에서 메모 exe를 찾는다(배포용 자동시작 등록에 사용). 없으면 null.</summary>
     public static string? FindMemoExe()
     {
         var dir = AppContext.BaseDirectory;
@@ -27,6 +27,49 @@ public static class Autostart
             if (File.Exists(p)) return p;
         }
         return null;
+    }
+
+    /// <summary>실행할 메모 바이너리(배포=exe/리눅스 실행파일, 개발=형제 Memo/bin의 Memo.dll)를 찾는다.</summary>
+    public static string? FindMemoLaunch()
+    {
+        var dir = AppContext.BaseDirectory;
+        foreach (var name in new[] { "수업메모.exe", "Memo.exe", "수업메모", "Memo", "Memo.dll" })
+        {
+            var p = Path.Combine(dir, name);
+            if (File.Exists(p)) return p;
+        }
+        // 개발 폴백: …/Gui/bin/<cfg>/<tfm>/ 옆의 …/Memo/bin/.../Memo.dll
+        try
+        {
+            for (var cur = new DirectoryInfo(dir); cur?.Parent != null; cur = cur.Parent)
+            {
+                var memoBin = Path.Combine(cur.Parent.FullName, "Memo", "bin");
+                if (Directory.Exists(memoBin))
+                {
+                    var dll = Directory.GetFiles(memoBin, "Memo.dll", SearchOption.AllDirectories).FirstOrDefault();
+                    if (dll != null) return dll;
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>메모 도구 실행(.dll이면 dotnet으로). popup=true면 즉시 팝업. 성공 시 true.</summary>
+    public static bool LaunchMemo(bool popup = false)
+    {
+        var p = FindMemoLaunch();
+        if (p == null) return false;
+        string arg = popup ? " --popup" : "";
+        try
+        {
+            var psi = p.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                ? new ProcessStartInfo("dotnet", $"\"{p}\"{arg}")
+                : new ProcessStartInfo(p) { UseShellExecute = true, Arguments = arg.Trim() };
+            Process.Start(psi);
+            return true;
+        }
+        catch { return false; }
     }
 
     [SupportedOSPlatform("windows")]

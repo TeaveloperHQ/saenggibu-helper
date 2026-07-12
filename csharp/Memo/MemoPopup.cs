@@ -36,6 +36,8 @@ public class MemoPopup : Window
         SystemDecorations = Avalonia.Controls.WindowDecorations.None;
         Topmost = true; CanResize = false; ShowInTaskbar = false;
         Width = 880; Height = 56; Background = Brushes.Transparent;
+        Avalonia.Media.Imaging.Bitmap? icon = null;
+        try { icon = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://Memo/Assets/appicon.png"))); Icon = new WindowIcon(icon); } catch { }
 
         _class = MkBox("학급", 84);
         _num = MkBox("번호", 66);
@@ -59,7 +61,7 @@ public class MemoPopup : Window
             Child = new StackPanel
             {
                 Orientation = Orientation.Horizontal, Spacing = 7, VerticalAlignment = VerticalAlignment.Center,
-                Children = { _class, _num, _name, _area, _subject, new Panel { Width = 6 }, _memo, _status, save, close },
+                Children = { new Image { Width = 24, Height = 24, Source = icon, VerticalAlignment = VerticalAlignment.Center }, _class, _num, _name, _area, _subject, new Panel { Width = 6 }, _memo, _status, save, close },
             },
         };
         _memo.Width = 300;

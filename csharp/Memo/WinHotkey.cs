@@ -27,8 +27,27 @@ public sealed class WinHotkey : IDisposable
     private Thread? _thread;
     private uint _threadId;
     private readonly Action _onFire;
+    private readonly uint _mods, _vk;
 
-    public WinHotkey(Action onFire) => _onFire = onFire;
+    public WinHotkey(Action onFire, uint mods, uint vk) { _onFire = onFire; _mods = mods; _vk = vk; }
+
+    // "Ctrl+Alt+M" → (modifiers, virtual-key). 실패 시 Ctrl+Alt+M.
+    public static (uint mods, uint vk) Parse(string? s)
+    {
+        uint mods = 0, vk = 0;
+        foreach (var raw in (s ?? "").Split('+'))
+        {
+            var p = raw.Trim().ToLowerInvariant();
+            if (p is "ctrl" or "control") mods |= MOD_CONTROL;
+            else if (p == "alt") mods |= MOD_ALT;
+            else if (p == "shift") mods |= 0x0004;
+            else if (p is "win" or "meta") mods |= 0x0008;
+            else if (p.Length == 1 && char.IsLetterOrDigit(p[0])) vk = char.ToUpperInvariant(p[0]);
+            else if (p.Length >= 2 && p[0] == 'f' && int.TryParse(p[1..], out var fn) && fn is >= 1 and <= 12) vk = (uint)(0x70 + fn - 1);
+        }
+        if (vk == 0 || mods == 0) { mods = MOD_CONTROL | MOD_ALT; vk = 0x4D; }
+        return (mods, vk);
+    }
 
     public void Start()
     {
@@ -42,7 +61,7 @@ public sealed class WinHotkey : IDisposable
     {
         _threadId = GetCurrentThreadId();
         // 스레드에 귀속된 전역 단축키(hWnd=IntPtr.Zero) → WM_HOTKEY가 이 스레드 큐로 전달됨
-        if (!RegisterHotKey(IntPtr.Zero, HOTKEY_ID, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4D /*VK_M*/)) return;
+        if (!RegisterHotKey(IntPtr.Zero, HOTKEY_ID, _mods | MOD_NOREPEAT, _vk)) return;
         try
         {
             while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
