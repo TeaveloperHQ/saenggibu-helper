@@ -271,7 +271,7 @@ public class MainWindow : Window
         string contentLabel = "내용";
         grid.Columns.Add(Col("학번", "Num", new DataGridLength(68)));
         grid.Columns.Add(Col("이름", "Name", new DataGridLength(90)));
-        grid.Columns.Add(Col(contentLabel, "Content", new DataGridLength(1, DataGridLengthUnitType.Star), wrap: true));
+        grid.Columns.Add(Col(contentLabel, "Content", new DataGridLength(420), wrap: true));   // 고정 폭 → 엑셀식 가로 스크롤(Star는 스크롤 이상)
         var extraCols = new List<(string id, string label)>();
         int extraSeq = 0;
         var sheetMsg = new TextBlock { Foreground = Brush.Parse("#666") };
@@ -505,7 +505,11 @@ public class MainWindow : Window
         miColHide.Click += (_, _) => { if (ctxColIdx >= 0 && ctxColIdx < grid.Columns.Count) { grid.Columns[ctxColIdx].IsVisible = false; UpdateHideMarkers(); Refresh(); } };
         var miColUnhide = new MenuItem { Header = "숨긴 열 모두 표시" };
         miColUnhide.Click += (_, _) => { foreach (var c in grid.Columns) c.IsVisible = true; UpdateHideMarkers(); Refresh(); };
-        var colItems = new Control[] { miColRename, miColLeft, miColRight, miColDel, new Separator(), miColHide, miColUnhide };
+        var miColFreeze = new MenuItem { Header = "여기까지 열 고정" };   // 엑셀식 틀 고정(가로 스크롤 시 왼쪽 유지)
+        miColFreeze.Click += (_, _) => { if (ctxColIdx >= 0) grid.FrozenColumnCount = Math.Clamp(ctxColIdx + 1, 1, grid.Columns.Count - 1); };
+        var miColUnfreeze = new MenuItem { Header = "열 고정 해제" };
+        miColUnfreeze.Click += (_, _) => grid.FrozenColumnCount = 0;
+        var colItems = new Control[] { miColRename, miColLeft, miColRight, miColDel, new Separator(), miColFreeze, miColUnfreeze, new Separator(), miColHide, miColUnhide };
 
         // 행머리글 메뉴
         var miRowAbove = new MenuItem { Header = "▲ 위에 행 삽입" };
@@ -545,6 +549,14 @@ public class MainWindow : Window
             {
                 miColDel.IsEnabled = ctxColIdx >= Fixed && ContentCount() > 1;   // 파이썬 규칙
                 miColUnhide.IsVisible = grid.Columns.Any(c => !c.IsVisible);     // 숨긴 열 있을 때만
+                bool frozen = grid.FrozenColumnCount > 0;
+                miColFreeze.IsVisible = !frozen;                                 // 고정 중엔 '열 고정' 숨김
+                miColUnfreeze.IsVisible = frozen;                               // 고정돼 있을 때만 해제 표시
+                if (frozen)
+                {
+                    var names = grid.Columns.Take(grid.FrozenColumnCount).Select(c => c.Header as string ?? "").Where(s => s.Length > 0);
+                    miColUnfreeze.Header = $"열 고정 해제 ({string.Join(", ", names)})";
+                }
                 menu.ItemsSource = colItems;
             }
             else if (ctxKind == "row") menu.ItemsSource = rowItems;
