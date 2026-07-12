@@ -172,7 +172,7 @@ public class MainWindow : Window
         grid.Columns.Add(new DataGridTextColumn { Header = "이름", Binding = new Binding("Name"), Width = new DataGridLength(84) });
         grid.Columns.Add(new DataGridTextColumn { Header = "내용", Binding = new Binding("Content"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
         var sheetMsg = new TextBlock { Foreground = Brush.Parse("#666") };
-        void LoadRows() { rows.Clear(); foreach (var (nu, na, co) in RosterData.ReadRows(_dataDir, Area().Key, CurClass())) rows.Add(new RowVm { Num = nu, Name = na, Content = co }); for (int i = rows.Count; i < 10; i++) rows.Add(new RowVm()); }
+        void LoadRows() { rows.Clear(); foreach (var (nu, na, co) in RosterData.ReadRows(_dataDir, Area().Key, CurClass())) rows.Add(new RowVm { Num = nu, Name = na, Content = co }); for (int i = rows.Count; i < 20; i++) rows.Add(new RowVm()); }
         void ReloadSheet() { var names = RosterData.ClassNames(_dataDir, Area().Key); classStrip.ItemsSource = names; if (classStrip.SelectedIndex < 0 && names.Count > 0) classStrip.SelectedIndex = 0; LoadRows(); }
         classStrip.SelectionChanged += (_, _) => LoadRows();
         addClass.Click += (_, _) => { var k = (newClass.Text ?? "").Trim(); if (k.Length == 0) return; RosterData.WriteRows(_dataDir, Area().Key, k, Array.Empty<(string, string, string)>()); newClass.Text = ""; classStrip.ItemsSource = RosterData.ClassNames(_dataDir, Area().Key); classStrip.SelectedItem = k; };
@@ -237,21 +237,27 @@ public class MainWindow : Window
         grid.ContextMenu = new ContextMenu { ItemsSource = new[] { reject } };
         grid.PointerWheelChanged += (_, e) => { if (e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Control)) { grid.FontSize = Math.Clamp(grid.FontSize + (e.Delta.Y > 0 ? 1 : -1), 9, 28); e.Handled = true; } };
 
-        // 레이아웃: 위 패널(입력·옵션) + 시트. 전체화면은 위 패널 숨김.
+        // 맞춤법 검사(선택 행 또는 입력) + 생성 대상 열
+        var spellBtn = new Button { Content = "맞춤법 검사" };
+        spellBtn.Click += async (_, _) => { string t = grid.SelectedItem is RowVm rr && rr.Content.Trim().Length > 0 ? rr.Content : (input.Text ?? "").Trim(); if (t.Length == 0) return; sheetMsg.Text = "네이버 맞춤법 검사 중…(온라인)"; var res = await Task.Run(() => Spellcheck.NaverSpellcheck(t)); sheetMsg.Text = res == null ? "맞춤법 검사 실패(오프라인/차단)." : $"교정: {res.Value.corrected} (오류 {res.Value.errata})"; };
+        var colCombo = new ComboBox { MinWidth = 100 }; colCombo.Items.Add("내용"); colCombo.SelectedIndex = 0;
+
+        // 레이아웃(파이썬 동일): 위 패널(입력·옵션) + 시트(학급탭줄 / 툴바 / 그리드)
         Control HRow(params Control[] cs) { var p = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 }; foreach (var c in cs) p.Children.Add(c); return p; }
-        var fsBtn = new Button { Content = "⛶ 전체화면" };
+        Control Bar(Control left, Control right) { var d = new DockPanel(); d.Children.Add(Docked(right, Dock.Right)); d.Children.Add(left); return d; }
+        var fsBtn = new Button { Content = "전체화면" };
         var topPanel = new StackPanel { Spacing = 6, Children = {
             areaStrip,
             HRow(new TextBlock { Text = "과목", VerticalAlignment = VerticalAlignment.Center }, subject, genOpts, new Control { Width = 12 }, learnLabel),
             new TextBlock { Text = "입력 (키워드·관찰 메모)", Margin = new Thickness(0, 6, 0, 0) }, input, morphBox, compliance,
             HRow(legend, termBtn), HRow(mode, genBtn, status) } };
         bool fs = false;
-        fsBtn.Click += (_, _) => { fs = !fs; topPanel.IsVisible = !fs; fsBtn.Content = fs ? "⤢ 원래대로" : "⛶ 전체화면"; };
+        fsBtn.Click += (_, _) => { fs = !fs; topPanel.IsVisible = !fs; fsBtn.Content = fs ? "원래대로" : "전체화면"; };
 
+        var hint = new TextBlock { Text = "행 클릭=선택 · 좌측 ✓=체크 · 우클릭=버리기 · Ctrl+휠=확대/축소", Foreground = Brush.Parse("#999"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
         var sheet = new DockPanel();
-        sheet.Children.Add(Docked(new TextBlock { Text = "학급 표 (체크된 행에 채워짐 · 우클릭 '버리기' · Ctrl+휠 확대)", FontWeight = FontWeight.Bold, Margin = new Thickness(0, 8, 0, 4) }, Dock.Top));
-        sheet.Children.Add(Docked(HRow(new TextBlock { Text = "학급", VerticalAlignment = VerticalAlignment.Center }, classStrip, newClass, addClass), Dock.Top));
-        sheet.Children.Add(Docked(HRow(addRow, saveSheet, importX, exportX, fsBtn), Dock.Top));
+        sheet.Children.Add(Docked(Bar(HRow(new TextBlock { Text = "학급", VerticalAlignment = VerticalAlignment.Center }, classStrip, newClass, addClass), fsBtn), Dock.Top));
+        sheet.Children.Add(Docked(Bar(HRow(new TextBlock { Text = "생성 대상 열", VerticalAlignment = VerticalAlignment.Center }, colCombo, hint), HRow(spellBtn, importX, exportX, saveSheet)), Dock.Top));
         sheet.Children.Add(Docked(sheetMsg, Dock.Top));
         sheet.Children.Add(grid);
 
