@@ -1,17 +1,18 @@
-# 생기부 도우미 (Saenggibu Helper)
+# 생기부 도우미 (Saenggibu Helper) — C#/.NET
 
 초·중·고 교사를 위한 **완전 오프라인 로컬 LLM** 생활기록부 작성 도우미.
 학생 개인정보가 외부로 나가지 않도록 문장 생성·변형·학습을 모두 교사 PC에서 수행한다.
 teaveloper 오프라인 앱 · Windows `.exe` 배포.
 
-- **모델**: Qwen2.5-7B-Instruct (Q4_K_M GGUF, Apache-2.0) — CPU 추론.
-  생기부 문체로 파인튜닝한 모델(`saenggibu-natural-*`)을 함께 제공/선택할 수 있다.
-- **UI**: PySide6 데스크톱 단일 창. 상단 **모드 탭**(생성 / 학습 / 과정 안내) + 영역별 탭.
-- **수업 메모 도구**: 작업표시줄(트레이)에 상주하는 별도의 가벼운 앱. 수업 중 관찰을
-  단축키(**Ctrl+Alt+M**)로 즉시 적어 학급 명단에 누적한다(모델 불필요). 아래 전용 절 참고.
-- **학습**: 교사가 **저장**한 결과를 로컬 DB에 누적 → 다음 생성 때 유사 예시를
-  BM25로 검색해 few-shot 주입하고, 자주 쓰는 부사·평가표현을 빈도 프로파일로 반영한다.
-  (인터넷·추가 모델 불필요)
+이 `main` 브랜치는 **Avalonia UI + LLamaSharp 기반 C#/.NET 8** 버전이다.
+원본 파이썬(PySide6) 구현은 **`python` 브랜치**에 예비로 보존되어 있으며, C#의 결정론 로직은
+파이썬을 진리값(golden set)으로 삼아 **바이트 단위 파리티**를 검증한다(아래 *파리티 검증* 참고).
+
+- **모델**: Qwen2.5-7B-Instruct (Q4_K_M GGUF, Apache-2.0) — CPU 추론(LLamaSharp).
+- **형태소 분석**: Kiwi C-API를 P/Invoke로 사용(kiwipiepy와 동일 모델·동일 결과).
+- **UI**: Avalonia 데스크톱 단일 창. 상단 **모드 탭**(생성 / 학습 / 과정 안내) + 영역별 탭.
+- **학습**: 교사가 **저장**한 결과를 로컬 SQLite에 누적 → 다음 생성 때 유사 예시를
+  순수 C# BM25로 검색해 few-shot 주입한다. (인터넷·추가 모델 불필요)
 
 ## 대상 사양
 - RAM 8GB / Intel i5 10세대 이상 / GPU 불필요
@@ -20,124 +21,111 @@ teaveloper 오프라인 앱 · Windows `.exe` 배포.
 ## 화면 구성 (3개 모드 탭)
 1. **✍ 생성 모드** — 영역별 탭에서 키워드·문장을 입력해 생기부 문장을 만든다.
    - **영역 탭**: 세부능력 및 특기사항(세특) · 행동특성 및 종합의견(행특) ·
-     자율활동 · 동아리활동 · 봉사활동 · 진로활동 · 문구 다듬기
+     자율활동 · 동아리활동 · 봉사활동 · 진로활동
    - **두 가지 생성 방식**
      - *내 문장 변형(같은 의미)* — 교사가 쓴 대표 문장의 **명사·고유명사·숫자는 그대로 두고**
        서술어·어미·어순만 바꿔 의미가 같은 서로 다른 문장 N개를 만든다(동료점검 복붙 방지).
-     - *키워드로 새로 생성* — 키워드로 새 문장을 만든 뒤 어순·표현을 재조합해 N개로 확장.
-   - **학급 표(엑셀식 시트)**: 학급 탭을 여러 개 두고, 체크한 행 수만큼 서로 다른 문장을 채운다.
-     엑셀 가져오기/내보내기, 맞춤법 검사, **💾 저장(= 파일 저장 + 자동 학습)**,
-     **⛶ 전체화면**(시트만 크게, Esc로 해제), **＋ 학급**(탭 끝) 지원.
-   - **실시간 형태소 점검**: 입력을 형태소로 나눠 색으로 표시(오타·미등록어 확인),
+       실수로 키워드를 넣으면 차단하고 생성 모드로 안내한다.
+     - *키워드로 새로 생성* — 키워드로 **독립적인 새 문장을 여러 번**(온도 로테이션) 만들어
+       다양성을 확보하고, 요청 수가 많으면 어순·표현 재조합으로 확장한다.
+   - **세특은 과목 필수** — 과목 없이 만들면 엉뚱한 문장이 나오므로 과목 선택을 강제한다.
+   - **학급 표(엑셀식 시트)** — 아래 *엑셀식 시트* 참고.
+   - **실시간 형태소 점검**: 입력을 Kiwi로 나눠 색으로 표시(오타·미등록어 확인),
      드래그 후 *용어 등록*으로 전문용어(고유명사)를 사전에 등록하면 철자가 보존된다.
    - **규정 위반 경고**: 공인어학시험·수상·논문·대학명·부모정보 등 기재 불가 항목을 감지해 경고.
-2. **📚 학습 모드** — 백업/복원, 기본 모델 선택, 용어 사전 관리, 학습 현황 확인.
-3. **🗺 과정 안내** — 입력→변형/생성→검증→표 채움 과정 도식과 오프라인/온라인 처리 안내.
+2. **📚 학습 모드** — 백업/복원, 기본 모델(GGUF) 선택·다운로드, 용어 사전 관리, 학습 현황.
+3. **🗺 과정 안내** — 입력→변형/생성→검증→표 채움 과정과 오프라인/온라인 처리 안내.
 
-## 수업 메모 도구 (트레이 상주 · 별도 실행 파일)
-메인 앱과 별개로 도는 **가벼운 메모 프로그램**(`quicknote.py` / 배포 시 `수업메모.exe`).
-모델을 쓰지 않아 즉시 뜨고, 수업 중 관찰을 빠르게 기록하는 용도다.
+## 엑셀식 시트
+학급 탭을 여러 개 두고(맨 끝 **＋** 로 추가), 선택한 행에 생성 문장을 채운다. 엑셀과 최대한 동일하게:
 
-- **실행 규칙**: 메인 앱은 아이콘 클릭으로, 메모 도구는 **부팅 시 자동 실행**되어
-  작업표시줄에 상주(최초 실행 시 Windows 시작 프로그램에 자동 등록). 두 앱은 아이콘으로 구분된다.
-- **팝업**: 트레이 아이콘 클릭 또는 **Ctrl+Alt+M**(변경 가능)으로 하단에 한 줄 바가 펼쳐진다.
-- **학급·번호·이름 동기화**: 셋 중 하나만 입력/선택하면 나머지가 **등록 명단 기준으로 자동 완성**된다.
-  동명이인 등 모호하면 드롭다운으로 고르고, 새 학생은 직접 입력해 추가한다.
-- **명단 직접 반영**: 저장(**Ctrl+S**)하면 해당 영역 학급 시트에 바로 기록된다 —
-  기존 학생이면 내용에 **이어붙이고**, 없으면 **행을 삽입**한다.
-  등록되지 않은 학급은 만들지 않아(고아 방지) 안전하다.
+- **행/열 편집**(우클릭): 위/아래 행 삽입·행 삭제, 좌/우 열 삽입·열 삭제, 열 이름 변경(머리글 더블클릭).
+  학번·이름은 고정, 내용 열은 최소 1개 유지.
+- **열 숨기기**: 우클릭 → 숨기기 / 숨긴 열 모두 표시. 숨긴 경계는 **테마색 실선**으로 머리글까지 표시.
+- **행 높이·열 너비**: 행번호·머리글 경계 드래그(행별 개별 조절). 내용 열은 **열 너비에 맞춰 줄바꿈 + 행높이 자동맞춤**.
+- **복사/붙여넣기**(Ctrl+C / Ctrl+V, TSV), **Delete**(셀 비우기), **Ctrl+휠**(화면 확대/축소).
+- **좌상단 코너 전체선택**: 학번=숫자·이름=한글 패턴으로 **학적 있는 행만** 능동 선택.
+- **생성 대상 열**: 모든 열을 표시하고 기본은 내용이 가장 많은 열을 고르되, 1·2학기 분리 등 최종 선택은 교사가 한다.
+- **찾기·바꾸기**: **현재 시트** 또는 **전체 학급** 범위로 내용 열 일괄 치환.
+- **엑셀 가져오기/내보내기**(.xlsx), **맞춤법 검사**, **💾 저장(= 파일 저장 + 자동 학습)**, **⛶ 전체화면**.
 
 ## 프라이버시 (무엇이 인터넷을 쓰나)
 - **오프라인(기본)**: 문장 생성·변형·학습·형태소 점검·규정 검사 — 학생 데이터는 PC를 벗어나지 않는다.
 - **온라인(선택)**: ① 최초 1회 모델 내려받기(HuggingFace) ② **맞춤법 검사**를 정확히 하려면
-  네이버로 문장을 전송 — 처음 누를 때 동의를 묻고, 동의하지 않으면 오프라인 검사만 한다.
+  네이버로 문장을 전송 — 동의하지 않으면 오프라인 검사만 한다.
 
 ## 생성 알고리즘 개요
-- **내 문장 변형**(`app/paraphrase.py`) = 통제 변형(controlled paraphrase)
+- **내 문장 변형**(`Core/Paraphrase.cs`) = 통제 변형(controlled paraphrase)
   1. **마스킹**: 등록 용어·복합명사를 플레이스홀더로 가려 분절·변경을 원천 차단.
-  2. **LLM 변형**: 보존 명사를 명시한 system 프롬프트 + 교사 과거 문장의 **어투 앵커** +
-     빈도 프로파일을 주고, 이미 만든 변형과 다르게 만들도록 라운드로 반복 생성.
-  3. **검증**(`_valid`): 한글+영문 깨짐·중간 끊김·비문 종결·연결어미 시작·지시문 따라쓰기·
-     취업어 표류를 거르고, **원문에 없던 내용 명사/기재 불가 항목 유입을 차단**.
-  4. **기계적 보충**(`_mechanical`): 서술어·명사 동의어 치환 + 절 순서 재배열 + 부사/관용/
-     평가절을 결정론적으로 조합해 개수를 보장(모델이 부족해도 안전판).
-  5. **명사형 종결 강제**(`app/postprocess.py`): 모든 종결을 `~함/임/됨/보임`으로 정규화.
-- **학습·검색**(`app/memory_store.py`): 순수 파이썬 BM25(어절+글자 bigram) — 자바 의존 없이 exe 안전.
-  같은 과목 예시를 우선(subject boost)하고, 교사 예시를 씨드 코퍼스보다 가깝게 배치.
+  2. **LLM 변형**: 보존 명사를 명시한 system 프롬프트 + 교사 과거 문장의 어투 앵커를 주고 라운드로 반복 생성.
+  3. **검증**: 한글+영문 깨짐·중간 끊김·비문 종결·지시문 따라쓰기를 거르고, 원문에 없던 내용/기재 불가 항목 유입 차단.
+  4. **기계적 보충**(`Core/Variation.cs`): 동의어 치환 + 절 순서 재배열로 개수를 보장(모델 부족 시 안전판).
+  5. **명사형 종결 강제**(`Core/Postprocess.cs`): 모든 종결을 `~함/임/됨/보임`으로 정규화.
+- **학습·검색**(`Core/MemoryStore.cs` + `Core/Bm25.cs`): 순수 C# BM25(어절+글자 bigram),
+  같은 과목 예시 우선(subject boost), 교사 예시를 씨드 코퍼스보다 가깝게 배치.
 
-## 개발 환경에서 실행
+## 개발 환경에서 실행 (.NET 8 SDK)
 ```bash
-python3.12 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python run.py                 # 메인 앱
-.venv/bin/python quicknote.py           # (선택) 수업 메모 도구 — 트레이 상주
+cd csharp
+dotnet run --project Gui -c Release           # 메인 앱(개발 실행)
+dotnet run --project Cli -c Release           # 골든 회귀 러너(파리티 검증)
 ```
-최초 실행 시 상단 배너의 **모델 내려받기** 버튼으로 GGUF(약 4.7GB)를 받는다.
-(또는 직접 받아 사용자 데이터 폴더의 `models/` 에 둔다.)
+런타임에 다음이 필요하며 환경변수로 경로를 지정한다(배포 시 앱 옆에 번들).
 
-### 8GB PC 튜닝 (환경변수)
-| 변수 | 기본 | 설명 |
-|------|------|------|
-| `SGB_N_CTX` | 4096 | 컨텍스트 길이. RAM 부족 시 2048로 |
-| `SGB_N_THREADS` | CPU-1 | 추론 스레드 |
-| `SGB_N_BATCH` | 256 | 배치 크기 |
-| `SGB_N_GPU_LAYERS` | 0 | 기본 CPU 전용 |
+| 변수 | 설명 |
+|------|------|
+| `SGB_GGUF` | Qwen2.5-7B GGUF 모델 경로(없으면 학습 모드에서 다운로드) |
+| `SGB_KIWI_MODEL` | Kiwi 모델 디렉터리(kiwipiepy_model) |
+| `SGB_SEED` | 내장 씨드 코퍼스(`assets/seed_corpus.jsonl`) |
+| `SGB_DATA` | 학습 DB·명단·설정 저장 폴더 |
+| `SGB_N_CTX` / `SGB_N_THREADS` / `SGB_N_BATCH` / `SGB_N_GPU_LAYERS` | LLM 파라미터(기본 4096 / CPU-1 / 256 / 0) |
 
-## 파인튜닝 (선택 · `train/`)
-생기부 자연 문체를 강화하려면 SFT→DPO 파이프라인을 쓴다.
-```
-train/build_dataset.py   자연 코퍼스(train/data/natural.jsonl)로 SFT 데이터 구성
-train/train_qlora.py     QLoRA SFT
-train/build_dpo.py       선호쌍 구성 → train/train_dpo.py   DPO
-train/merge_lora.py      LoRA 병합 후 GGUF 양자화(q4_k_m)
-```
-결과 GGUF를 사용자 `models/` 에 두면 **학습 모드 → 기본 모델**에서 선택할 수 있다.
+> Kiwi C-API 네이티브 라이브러리는 `LD_LIBRARY_PATH`(리눅스) 또는 앱 폴더(Windows)에서 로드된다.
 
-## Windows exe 빌드
-> PyInstaller는 **대상 OS에서 빌드**해야 한다. Windows exe는 Windows에서 빌드.
-```powershell
-python -m pip install -r requirements.txt pyinstaller
-pyinstaller build/saenggibu.spec --noconfirm
+## Windows exe 빌드 (리눅스에서 크로스 빌드 가능)
+```bash
+cd csharp
+dotnet publish Gui/Gui.csproj -c Release -r win-x64 --self-contained \
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 ```
-- 산출물: `dist/생기부도우미/` 아래 **두 개의 exe**
-  - `생기부도우미.exe` — 메인 앱(아이콘 클릭 실행)
-  - `수업메모.exe` — 트레이 메모 도구(최초 실행 시 시작 프로그램 자동 등록)
-  - 공통 라이브러리는 스펙의 `MERGE`로 공유해 용량 중복을 없앤다.
-- 앱 아이콘: 메인 `app/assets/app.ico`, 메모 `app/assets/memo.ico`(브랜드 구분). 스펙의 `icon=` 에 지정됨.
-- GGUF 모델은 용량이 커서 exe에 포함하지 않는다. 다음 중 하나로 제공한다.
-  1. 산출물 폴더 옆 `models/` 에 GGUF를 넣어 배포(오프라인 즉시 사용)
-  2. 그대로 배포 → 교사 PC 최초 실행 시 앱이 내려받기
+- 단일 실행 파일(self-contained)로 산출된다. .NET 런타임 설치 불필요.
+- LLamaSharp CPU 백엔드(llama.cpp)·Kiwi 네이티브 라이브러리가 함께 포함된다.
+- GGUF 모델은 용량이 커서 exe에 포함하지 않는다 — 앱 옆 `models/` 에 두거나 최초 실행 시 앱이 내려받는다.
+
+## 파리티 검증 (골든셋)
+C#의 결정론 경로(형태소·프롬프트·BM25·후처리·규정·난수 등)는 파이썬을 진리값으로 삼아 검증한다.
+```bash
+dotnet run --project Cli -c Release        # → "Tier A 골든 회귀: 131 PASS / 0 FAIL"
+```
+- 기대값 `csharp/golden/golden.json` 은 `python` 브랜치의 파이썬에서 생성한다
+  (`csharp/tools/gen_golden.py`, `gen_prompts_cs.py` — 실행에는 파이썬 `app/` 필요).
+- C# 빌드·실행·골든 러너 자체는 커밋된 `golden.json`/`PromptsData.cs` 를 쓰므로 파이썬 없이 동작한다.
 
 ## 데이터 위치
-- 학습 DB: `%LOCALAPPDATA%\SaenggibuHelper\memory.sqlite3` (Windows) /
-  `~/.local/share/saenggibu-helper/memory.sqlite3` (리눅스)
-- 모델: 사용자 데이터 폴더의 `models/` (우선) 또는 실행 파일 옆 `models/`
-- 설정: 같은 폴더의 `settings.json` (`active_model`, 맞춤법 온라인 동의 등)
+- 학습 DB(SQLite)·학급 명단·설정: `SGB_DATA` 폴더(미지정 시 OS 사용자 데이터 폴더).
+- 모델: `SGB_GGUF` 또는 앱 옆 `models/`.
 
 ## 구조
 ```
-app/
-  config.py        설정·경로·모델 사양·LLM 파라미터
-  theme.py         teaveloper 공통 테마(QSS)·브랜드 아이콘/엠블럼
-  prompts.py       영역별 system/user 프롬프트 + 공통 작성 원칙
-  engine.py        llama.cpp 래퍼(지연 로딩·few-shot 구성·스트리밍)
-  paraphrase.py    통제 변형(마스킹·LLM·검증·기계적 보충)  ← 핵심
-  variation.py     키워드 생성 모드의 어순·동의어 조합 확장
-  postprocess.py   명사형 종결 강제(결정론적)
-  compliance.py    생기부 기재 불가 항목 검사
-  spellcheck.py    형태소 점검 + (동의 시)네이버 맞춤법
-  glossary.py/terms.py  전문용어(고유명사) 등록·보존
-  memory_store.py  SQLite 예시 저장 + BM25 few-shot 검색(학습)
-  downloader.py    최초 1회 모델 다운로드(이어받기)
-  importer.py      엑셀/CSV 학급 명단 가져오기
-  roster_data.py   학급 명단 읽기/기록(메모 도구 동기화·행 삽입)
-  autostart.py     메모 도구 Windows 시작 프로그램 등록/해제
-  ui/              PySide6 메인창·영역 탭·학급 시트·워커 스레드
-  ui/quicknote.py  수업 메모 도구(트레이 상주·팝업·전역 단축키)
+csharp/
+  Core/    이식된 결정론 로직 + 엔진
+    Paraphrase.cs     통제 변형(마스킹·LLM·검증·기계적 보충)  ← 핵심
+    Variation.cs      키워드 생성/확장(어순·동의어 조합)
+    Postprocess.cs    명사형 종결 강제(결정론)
+    Compliance.cs     생기부 기재 불가 항목 검사
+    Prompts.cs / PromptsData.cs   영역별 system/user 프롬프트(코드젠)
+    Engine.cs / LlamaEngine.cs    few-shot 구성 + LLamaSharp 추론
+    KiwiNative.cs     Kiwi C-API P/Invoke(형태소 분석·결합)
+    MemoryStore.cs / Bm25.cs      SQLite 예시 저장 + BM25 few-shot 검색(학습)
+    PyRandom.cs       CPython MT19937 재현(난수 파리티)
+    Importer.cs       엑셀(.xlsx) 명단 가져오기/내보내기(ClosedXML)
+    RosterData.cs     학급 명단·시트 읽기/기록
+    Glossary.cs / Spellcheck.cs / Downloader.cs / Settings.cs / Config.cs 등
+  Gui/     Avalonia 데스크톱 UI(MainWindow.cs, Icons.cs, Assets/)
+  Cli/     골든 회귀 러너 + 진단 서브커맨드
+  golden/  golden.json(파이썬 진리값)
+  tools/   파이썬 코드젠·골든 생성기(python 브랜치의 app/ 필요)
 assets/seed_corpus.jsonl   내장 씨드 코퍼스(문장 '형식' 학습용)
-build/saenggibu.spec       PyInstaller 스펙(메인·메모 두 exe)
-train/                     SFT·DPO 파인튜닝 파이프라인 (학습 데이터는 비공개)
-run.py / quicknote.py      메인 앱 / 메모 도구 진입점
 ```
 
 ## 주의 / 면책
