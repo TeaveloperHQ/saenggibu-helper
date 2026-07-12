@@ -814,6 +814,22 @@ public static class Paraphrase
         return ExpandVariants(bases, n);                       // 초과분만 기계 변형으로 확장
     }
 
+    /// <summary>변형 모드 안전장치 — 완성 문장이 아니라 '키워드 나열'로 보이면 true.
+    /// 슬래시(/) 나열이거나 서술어(용언)·문장 어미가 전혀 없으면 키워드로 판단.</summary>
+    public static bool LooksLikeKeywords(string text, IKiwi? kiwi)
+    {
+        string t = (text ?? "").Trim();
+        if (t.Length == 0) return false;
+        if (t.Contains('/')) return true;                 // 앱의 키워드 나열 형식(A / B / C)
+        if (kiwi == null) return false;
+        List<(string form, string tag)> toks;
+        try { toks = kiwi.Tokenize(t).ToList(); }
+        catch { return false; }
+        bool hasPredicate = toks.Any(x => x.tag.StartsWith("V") || x.tag == "XSV" || x.tag == "XSA");
+        bool hasEnding = toks.Any(x => x.tag is "EF" or "EC" or "ETN" or "ETM");
+        return !hasPredicate && !hasEnding;
+    }
+
     private static int CountHangul(string s) { int c = 0; foreach (var ch in s) if (ch >= 0xAC00 && ch <= 0xD7A3) c++; return c; }
     private static readonly Regex HanziRe = new(@"[一-鿿]", RegexOptions.Compiled);
     private static readonly Regex RoleLeakRe = new(@"\b(assistant|user|system)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);

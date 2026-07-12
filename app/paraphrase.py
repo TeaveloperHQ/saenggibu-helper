@@ -28,6 +28,28 @@ def _fix_spacing(s: str) -> str:
     return s
 
 
+def looks_like_keywords(text: str) -> bool:
+    """변형 모드 안전장치 — 완성 문장이 아니라 '키워드 나열'로 보이면 True.
+    슬래시(/) 나열이거나, 서술어(용언)·문장 어미가 전혀 없으면 키워드로 판단한다.
+    (실수로 키워드를 넣고 '같은 의미 문장 만들기'를 눌러 엉뚱한 결과가 나오는 것을 막는다.)"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if "/" in t:                      # 앱의 키워드 나열 형식(A / B / C)
+        return True
+    from .spellcheck import _get_kiwi
+    kiwi = _get_kiwi()
+    if kiwi is None:
+        return False
+    try:
+        tags = [tk.tag for tk in kiwi.tokenize(t)]
+    except Exception:
+        return False
+    has_predicate = any(tg[:1] == "V" or tg in ("XSV", "XSA") for tg in tags)
+    has_ending = any(tg in ("EF", "EC", "ETN", "ETM") for tg in tags)
+    return not has_predicate and not has_ending
+
+
 def _fix_josa_ro(text: str) -> str:
     """받침 있는 명사(ㄹ 제외) 뒤 조사 '로'→'으로'(예: '요약문로'→'요약문으로').
     kiwi가 조사 '로'(JKB)를 분리 인식하므로 '진로·회로' 같은 단어는 건드리지 않는다."""

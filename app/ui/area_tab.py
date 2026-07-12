@@ -293,6 +293,15 @@ class AreaTab(QWidget):
         if not self.input_edit.toPlainText().strip():
             QMessageBox.information(self, "입력 필요", "키워드나 관찰 내용을 입력해 주세요.")
             return
+        # 안전장치: '내 문장 변형' 모드에 키워드성 입력이 오면 차단(엉뚱한 결과 방지)
+        if self.mode_combo.currentIndex() != 1:
+            from ..paraphrase import looks_like_keywords
+            if looks_like_keywords(self.input_edit.toPlainText().strip()):
+                QMessageBox.information(
+                    self, "문장 필요",
+                    "'내 문장 변형(같은 의미)'은 완성된 문장을 넣어야 합니다.\n"
+                    "키워드로 새 문장을 만들려면 '키워드로 새로 생성' 모드를 선택해 주세요.")
+                return
         # 세특은 과목을 반드시 골라야 한다(과목 없이 만들면 엉뚱한 문장이 나올 수 있음)
         if self.area.subject_field and not self._subject_text():
             QMessageBox.information(

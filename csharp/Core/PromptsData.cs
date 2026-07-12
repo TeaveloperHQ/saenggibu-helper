@@ -68,15 +68,5 @@ public static class PromptsData
             SystemExtra = "[진로활동 고유 규칙]\n- 진로 탐색 활동과 그 과정에서 구체화된 관심·목표·실천을 서술한다.\n- 특정 대학·학과 명시는 피하고 계열·분야 수준으로 표현한다.",
             ColdStart = ("", "", ""),
         },
-        new AreaSpec
-        {
-            Key = "polish",
-            Title = "문구 다듬기",
-            SubjectField = false,
-            CharLimit = 1500,
-            InputHint = "다듬고 싶은 초안을 붙여넣으세요. (맞춤법·문체·생기부 어투로 교정합니다)",
-            SystemExtra = "[문구 다듬기 규칙]\n- 교사가 입력한 초안의 내용·사실은 바꾸지 않고, 생기부 어투와 맞춤법만 교정한다.\n- 명사형 종결·개조식으로 자연스럽게 다듬고, 중복·비문을 정리한다.\n- 없는 사실을 새로 만들어내지 않는다.",
-            ColdStart = ("", "", ""),
-        },
     };
 }

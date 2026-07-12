@@ -142,19 +142,6 @@ AREAS: list[AreaSpec] = [
             "- 특정 대학·학과 명시는 피하고 계열·분야 수준으로 표현한다."
         ),
     ),
-    AreaSpec(
-        key="polish",
-        title="문구 다듬기",
-        subject_field=False,
-        char_limit=1500,
-        input_hint="다듬고 싶은 초안을 붙여넣으세요. (맞춤법·문체·생기부 어투로 교정합니다)",
-        system_extra=(
-            "[문구 다듬기 규칙]\n"
-            "- 교사가 입력한 초안의 내용·사실은 바꾸지 않고, 생기부 어투와 맞춤법만 교정한다.\n"
-            "- 명사형 종결·개조식으로 자연스럽게 다듬고, 중복·비문을 정리한다.\n"
-            "- 없는 사실을 새로 만들어내지 않는다."
-        ),
-    ),
 ]
 
 AREA_BY_KEY = {a.key: a for a in AREAS}

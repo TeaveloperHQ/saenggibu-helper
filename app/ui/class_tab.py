@@ -482,7 +482,11 @@ class RosterGrid(QTableWidget):
         for k, r in enumerate(rows):
             if k >= len(variants):
                 break
-            self.setItem(r, col, QTableWidgetItem(variants[k]))
+            prev = self.item(r, col)
+            prev_text = prev.text().strip() if prev else ""
+            new = variants[k].strip()
+            combined = f"{prev_text} {new}".strip() if prev_text else new
+            self.setItem(r, col, QTableWidgetItem(combined))
         self._bulk = False
         self._end_group()
         self._fit_rows()
