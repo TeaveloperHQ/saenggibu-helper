@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -122,6 +123,69 @@ public static class RosterData
             if (!(string.IsNullOrWhiteSpace(num) && string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(content)))
                 arr.Add(new JsonArray(num, name, content));
         data[klass] = new JsonObject { ["headers"] = new JsonArray("내용"), ["rows"] = arr };
+        File.WriteAllText(path, data.ToJsonString(new JsonSerializerOptions
+        { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+    }
+
+    /// <summary>확장 시트 읽기 — 첫 내용 열 라벨(contentLabel) + 추가 내용 열(ext) + 각 행의 추가 값.</summary>
+    public static (string contentLabel, List<(string id, string label)> extra,
+                   List<(string num, string name, string content, List<string> extraVals)> rows)
+        ReadRowsExtended(string dir, string area, string klass)
+    {
+        string contentLabel = "내용";
+        var extra = new List<(string, string)>();
+        var outp = new List<(string, string, string, List<string>)>();
+        var path = Path.Combine(dir, $"roster_{area}.json");
+        if (!File.Exists(path)) return (contentLabel, extra, outp);
+        try
+        {
+            if (JsonNode.Parse(File.ReadAllText(path)) is JsonObject o && o[klass] is JsonObject e)
+            {
+                if (e["headers"] is JsonArray hs && hs.Count > 0 && hs[0]?.GetValue<string>() is { Length: > 0 } h0) contentLabel = h0;
+                if (e["ext"] is JsonArray ea)
+                    foreach (var it in ea)
+                        if (it is JsonObject eo)
+                            extra.Add((eo["id"]?.GetValue<string>() ?? "", eo["label"]?.GetValue<string>() ?? ""));
+                if (e["rows"] is JsonArray rows)
+                    foreach (var r in rows)
+                        if (r is JsonArray row)
+                        {
+                            string num = row.Count > 0 ? row[0]?.GetValue<string>() ?? "" : "";
+                            string name = row.Count > 1 ? row[1]?.GetValue<string>() ?? "" : "";
+                            string content = row.Count > 2 ? row[2]?.GetValue<string>() ?? "" : "";
+                            var ev = new List<string>();
+                            for (int i = 0; i < extra.Count; i++)
+                                ev.Add(row.Count > 3 + i ? row[3 + i]?.GetValue<string>() ?? "" : "");
+                            outp.Add((num, name, content, ev));
+                        }
+            }
+        }
+        catch { }
+        return (contentLabel, extra, outp);
+    }
+
+    /// <summary>확장 시트 저장 — 학번·이름 + 내용 열들(contentLabel 첫 열) + 각 행 값. 완전 빈 행 제외.</summary>
+    public static void WriteRowsExtended(string dir, string area, string klass, string contentLabel,
+        IReadOnlyList<(string id, string label)> extra,
+        IEnumerable<(string num, string name, string content, IReadOnlyList<string> extraVals)> rows)
+    {
+        var path = Path.Combine(dir, $"roster_{area}.json");
+        JsonObject data;
+        try { data = (JsonNode.Parse(File.Exists(path) ? File.ReadAllText(path) : "{}") as JsonObject) ?? new(); }
+        catch { data = new(); }
+        var arr = new JsonArray();
+        foreach (var (num, name, content, ev) in rows)
+        {
+            bool empty = string.IsNullOrWhiteSpace(num) && string.IsNullOrWhiteSpace(name)
+                         && string.IsNullOrWhiteSpace(content) && (ev == null || ev.All(string.IsNullOrWhiteSpace));
+            if (empty) continue;
+            var row = new JsonArray(num, name, content);
+            if (ev != null) foreach (var v in ev) row.Add(v ?? "");
+            arr.Add(row);
+        }
+        var ext = new JsonArray();
+        foreach (var (id, label) in extra) ext.Add(new JsonObject { ["id"] = id, ["label"] = label });
+        data[klass] = new JsonObject { ["headers"] = new JsonArray(string.IsNullOrEmpty(contentLabel) ? "내용" : contentLabel), ["ext"] = ext, ["rows"] = arr };
         File.WriteAllText(path, data.ToJsonString(new JsonSerializerOptions
         { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
     }

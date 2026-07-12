@@ -776,18 +776,82 @@ public static class Paraphrase
     public static List<string> GenerateFromKeywords(AreaSpec area, MemoryStore store, ILlmEngine engine, IKiwi kiwi,
         string subject, string keywords, string tone, string lengthHint, int n, IReadOnlyCollection<string> glossaryTerms)
     {
+        // app/ui/workers.py _make_variations 이식: 키워드로 '독립적인 새 문장'을 최대
+        // VariationBaseMax(5)개까지 매번 별도 LLM 호출(온도 0.6/0.7/0.8 로테이션)로 생성한다.
+        // 1개만 생성 후 변형으로 채우면 '생성이 변형처럼' 되어 풍부함이 떨어지므로, 여러 번
+        // 독립 생성해 다양성을 확보하고, 요청 수(n)가 기본 문장 수를 넘을 때만 기계 확장한다.
         keywords = (keywords ?? "").Trim();
         if (keywords.Length == 0) return new();
-        var msgs = Engine.BuildMessages(area, store, subject, keywords, tone, lengthHint, 1);
-        string raw = engine.CompleteMessages(msgs, Config.DefaultMaxTokens, Config.DefaultTemperature);
-        // 지시문 에코 제거 + 명사형 종결 정규화
-        var lines = raw.Split('\n').Select(CleanLine).Where(s => s.Length > 0 && !Postprocess.HasPromptEcho(s));
-        string sent = Postprocess.ToNominalEndings(string.Join(" ", lines)).Trim();
-        if (sent.Length == 0) return new();
-        if (n <= 1) return new List<string> { sent };
-        var vars = LlmParaphrase(sent, n, engine, kiwi, glossaryTerms, Array.Empty<string>(), subject);
-        var outp = new List<string> { sent };
-        foreach (var v in vars) if (v.Replace(" ", "") != sent.Replace(" ", "")) outp.Add(v);
+        n = Math.Max(1, n);
+        int baseTarget = Math.Min(n, Config.VariationBaseMax);
+        var temps = Config.VariationTemps;
+        var bases = new List<string>();
+        var fallback = new List<string>();       // 정크 필터에 걸려도 보관(전부 걸릴 때 대비)
+        var seen = new HashSet<string>();
+        for (int i = 0; i < baseTarget * 4 && bases.Count < baseTarget; i++)
+        {
+            string raw;
+            try
+            {
+                var msgs = Engine.BuildMessages(area, store, subject, keywords, tone, lengthHint, 1);
+                raw = engine.CompleteMessages(msgs, Config.DefaultMaxTokens, temps[i % temps.Length]);
+            }
+            catch { continue; }
+            raw = (raw ?? "").Trim();
+            if (raw.Length == 0) continue;
+            var lines = raw.Split('\n').Select(CleanLine).Where(s => s.Length > 0 && !Postprocess.HasPromptEcho(s));
+            string v = Postprocess.ToNominalEndings(string.Join(" ", lines)).Trim();
+            if (CountHangul(v) < 6) continue;                 // 에코 제거 후 너무 짧으면 폐기
+            string key = v.Replace(" ", "");
+            if (key.Length == 0) continue;
+            if (!seen.Contains(key) && !fallback.Contains(v)) fallback.Add(v);
+            if (!LooksClean(raw)) continue;                   // 한자·역할토큰·영어과다·한글부족 폐기
+            if (seen.Add(key)) bases.Add(v);
+        }
+        if (bases.Count == 0) bases = fallback;
+        if (bases.Count == 0) return new();
+        if (n <= bases.Count) return bases.Take(n).ToList();
+        return ExpandVariants(bases, n);                       // 초과분만 기계 변형으로 확장
+    }
+
+    private static int CountHangul(string s) { int c = 0; foreach (var ch in s) if (ch >= 0xAC00 && ch <= 0xD7A3) c++; return c; }
+    private static readonly Regex HanziRe = new(@"[一-鿿]", RegexOptions.Compiled);
+    private static readonly Regex RoleLeakRe = new(@"\b(assistant|user|system)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>app/ui/workers.py _looks_clean — 깨진 생성(한자·역할누출·영어과다·한글부족·에코) 폐기.</summary>
+    private static bool LooksClean(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        if (Postprocess.HasPromptEcho(text)) return false;
+        if (HanziRe.IsMatch(text)) return false;
+        if (RoleLeakRe.IsMatch(text)) return false;
+        if (text.Count(c => (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) > 8) return false;
+        if (CountHangul(text) < 10) return false;
+        return true;
+    }
+
+    /// <summary>app/variation.py expand_variants — 기본 문장들을 라운드로빈 동의어·어순 변형으로 n개 확장.</summary>
+    private static List<string> ExpandVariants(List<string> bases, int n)
+    {
+        bases = bases.Where(b => b.Trim().Length > 0).Select(b => b.Trim()).ToList();
+        if (bases.Count == 0) return new();
+        if (n <= bases.Count) return bases.Take(n).ToList();
+        var seen = new HashSet<string>();
+        var outp = new List<string>();
+        foreach (var b in bases) { var k = b.Replace(" ", ""); if (seen.Add(k)) outp.Add(b); }   // 풍부한 기본문 우선
+        var gens = bases.Select(b => Variation.SynonymVariants(b).GetEnumerator()).ToList();
+        bool progressed = true;
+        while (outp.Count < n && gens.Count > 0 && progressed)
+        {
+            progressed = false;
+            for (int gi = gens.Count - 1; gi >= 0 && outp.Count < n; gi--)
+            {
+                if (!gens[gi].MoveNext()) { gens.RemoveAt(gi); continue; }
+                progressed = true;
+                string key = gens[gi].Current.Replace(" ", "");
+                if (key.Length > 0 && seen.Add(key)) outp.Add(gens[gi].Current);
+            }
+        }
         return outp.Take(n).ToList();
     }
 

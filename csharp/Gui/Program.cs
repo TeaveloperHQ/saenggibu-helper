@@ -16,6 +16,8 @@ class Program
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            // 리눅스(X11/XWayland) 한글 IME(ibus XIM) 조합 입력 활성화. Windows에선 무시됨.
+            .With(new X11PlatformOptions { EnableIme = true })
 #if DEBUG
             .WithDeveloperTools()
 #endif
