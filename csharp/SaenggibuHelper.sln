@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Cli", "Cli\Cli.csproj", "{9
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Gui", "Gui\Gui.csproj", "{78F0649D-04D9-4E56-AAF9-473CB660CD48}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Memo", "Memo\Memo.csproj", "{9F869CD7-EFE2-4DDF-B9D4-615A09398FC3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +32,9 @@ Global
 		{78F0649D-04D9-4E56-AAF9-473CB660CD48}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{78F0649D-04D9-4E56-AAF9-473CB660CD48}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{78F0649D-04D9-4E56-AAF9-473CB660CD48}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9F869CD7-EFE2-4DDF-B9D4-615A09398FC3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9F869CD7-EFE2-4DDF-B9D4-615A09398FC3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9F869CD7-EFE2-4DDF-B9D4-615A09398FC3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9F869CD7-EFE2-4DDF-B9D4-615A09398FC3}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
