@@ -19,7 +19,7 @@ public sealed class MemoryStore : IDisposable
         _conn.Open();
     }
 
-    private List<Example> RowsForArea(string area)
+    public List<Example> RowsForArea(string area)
     {
         // Python: SELECT * FROM examples WHERE area=? AND rating>=1 (rowid 순)
         using var cmd = _conn.CreateCommand();

@@ -119,6 +119,18 @@ if (args.Length > 0 && args[0] == "plantest")
     return 0;
 }
 
+// 서브커맨드: proftest <kiwiModel> <db> <area> [subject] — TeacherProfile 파리티
+if (args.Length > 0 && args[0] == "proftest")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    using var kiwi = new KiwiNative(args[1]);
+    using var store = new MemoryStore(args[2]);
+    var (adv, ev) = Paraphrase.TeacherProfile(store, args[3], args.Length > 4 ? args[4] : "", kiwi);
+    Console.WriteLine("ADV " + string.Join(",", adv));
+    Console.WriteLine("EVAL " + string.Join(",", ev));
+    return 0;
+}
+
 // 서브커맨드: spelltest <text> — 네이버 맞춤법 교정
 if (args.Length > 0 && args[0] == "spelltest")
 {

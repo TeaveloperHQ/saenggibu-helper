@@ -89,6 +89,39 @@ public static class Patterns
         return outp;
     }
 
+    private static readonly string[] Axes = { "comp", "end", "order", "conn" };
+
+    /// <summary>app/patterns.py analyze — 예시 묶음의 축별 빈도 프로파일(표본 적으면 기본값).
+    /// set-union 키 순서는 Python이 비결정이므로 C#은 결정적 순서(기본값 우선). LLM 입력이라 무방.</summary>
+    public static Dictionary<string, (string, double)[]> Analyze(IReadOnlyList<string> texts)
+    {
+        var counters = Axes.ToDictionary(a => a, _ => new Dictionary<string, int>());
+        int n = 0;
+        foreach (var t0 in texts)
+        {
+            var t = (t0 ?? "").Trim();
+            if (t.Length == 0) continue;
+            n++;
+            var lab = Classify(t);
+            foreach (var a in Axes)
+                counters[a][lab[a]] = counters[a].GetValueOrDefault(lab[a], 0) + 1;
+        }
+        if (n < 8) return DefaultProfile.ToDictionary(kv => kv.Key, kv => kv.Value);
+        var prof = new Dictionary<string, (string, double)[]>();
+        foreach (var a in Axes)
+        {
+            int tot = counters[a].Values.Sum(); if (tot == 0) tot = 1;
+            double w = Math.Min(1.0, n / 60.0);
+            var keys = new List<string>();
+            foreach (var (k, _) in DefaultProfile[a]) if (!keys.Contains(k)) keys.Add(k);   // 기본값 순서 우선
+            foreach (var k in counters[a].Keys) if (!keys.Contains(k)) keys.Add(k);
+            var def = DefaultProfile[a].ToDictionary(x => x.Item1, x => x.Item2);
+            prof[a] = keys.Select(k => (k, w * (counters[a].GetValueOrDefault(k, 0) / (double)tot)
+                + (1 - w) * def.GetValueOrDefault(k, 0.0))).ToArray();
+        }
+        return prof;
+    }
+
     /// <summary>app/patterns.py instruction — 구조 타깃 → LLM 한 줄 지시.</summary>
     public static string Instruction(Dictionary<string, string> t)
     {

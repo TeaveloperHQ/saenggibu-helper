@@ -594,7 +594,8 @@ public static class Paraphrase
     /// 다문장은 _recombine 우선, 부족분은 _mechanical 보충. LLM층은 백엔드 차로 비결정.</summary>
     public static List<string> LlmParaphrase(string sentence, int n, ILlmEngine engine, IKiwi kiwi,
         IReadOnlyCollection<string> glossaryTerms, IReadOnlyList<string> rejected, string subject = "",
-        Func<string, bool>? emitProgress = null)
+        Func<string, bool>? emitProgress = null, IReadOnlyList<string>? anchors = null,
+        IReadOnlyList<string>? favExprs = null, Dictionary<string, (string, double)[]>? structProfile = null)
     {
         sentence = (sentence ?? "").Trim();
         if (sentence.Length == 0) return new List<string>();
@@ -611,10 +612,23 @@ public static class Paraphrase
         var (allk0, crit0) = Nouns(masked, kiwi, glossaryTerms);
         var allk = Dedup(allk0.Concat(placeholders));
         var crit = Dedup(crit0.Concat(placeholders));
-        var structPlan = Patterns.Plan(n, Patterns.DefaultProfile, new PyRandom(SeedOf(sentence)));
+        var structPlan = Patterns.Plan(n, structProfile ?? Patterns.DefaultProfile, new PyRandom(SeedOf(sentence)));
         string system = BuildSystem(allk);
         int per = Math.Min(Math.Max(3, n), 6);
         double[] temps = { 0.8, 0.95, 1.05, 0.85, 1.0, 1.1 };
+
+        // 개인화: 교사 어투 앵커 + 자주 쓰는 표현(용어는 가려서 표시)
+        string anchorBlock = "";
+        if (anchors is { Count: > 0 })
+        {
+            var ma = anchors.Select(a => MaskTerms(a, kiwi, glossaryTerms).masked);
+            anchorBlock = "참고 — 네가 전에 쓴 서술 표현들이다. 이 어투·표현을 적극 빌려 다양하게 바꾸되, " +
+                "거기 담긴 소재·내용은 가져오지 말고 원문의 명사는 그대로 둬라:\n" +
+                string.Join("\n", ma.Select(a => "- " + a)) + "\n\n";
+        }
+        var fav = (favExprs ?? Array.Empty<string>()).ToList();
+        if (fav.Count > 0)
+            anchorBlock += "네가 특히 자주 쓰는 표현·어투다. 되도록 이 말투를 살려라: " + string.Join(", ", fav) + "\n\n";
 
         var origBlock = new HashSet<string>(Compliance.Check(sentence).Where(x => x.level == "block").Select(x => x.token));
         var results = new List<string>();
@@ -648,7 +662,7 @@ public static class Paraphrase
             string structBlock = "아래 지정한 '서로 다른 문장 구조'로 하나씩 만들어라. 부사만 바꾸지 말고 " +
                 "문장 구성·종결 방식·절 연결을 지시대로 바꿔라:\n" +
                 string.Join("\n", targets.Select((t, k) => $"{k + 1}) {Patterns.Instruction(t)}")) + "\n\n";
-            string user = avoidBlock + structBlock + $"원문: {masked}\n\n" +
+            string user = anchorBlock + avoidBlock + structBlock + $"원문: {masked}\n\n" +
                 $"원문의 명사(대상·소재)는 그대로 두고, 서로 다른 표현 {per}가지를 한 줄에 하나씩 출력해라.\n" +
                 "- 부사나 생기부 관용 표현을 덧붙이거나 서술어를 바꿔 문장을 서로 다르게 만든다.\n" +
                 "- 고유명사·전문용어·숫자는 절대 바꾸지 않는다.\n" +
@@ -686,6 +700,74 @@ public static class Paraphrase
                 if (v.Replace(" ", "") != sentence.Replace(" ", "")) { results.Add(v); break; }
             }
         return results.Take(n).ToList();
+    }
+
+    /// <summary>app/paraphrase.py _teacher_profile — 교사가 자주 쓰는 부사·평가표현(빈도순).</summary>
+    public static (List<string> adverbs, List<string> evals) TeacherProfile(
+        MemoryStore store, string areaKey, string subject, IKiwi kiwi)
+    {
+        if (areaKey.Length == 0) return (new(), new());
+        var docs = store.RowsForArea(areaKey);
+        if (subject.Length > 0)
+        {
+            var sub = docs.Where(d => d.Subject.Length > 0 && (subject.Contains(d.Subject) || d.Subject.Contains(subject))).ToList();
+            if (sub.Count > 0) docs = sub;
+        }
+        var allow = new HashSet<string>(ParaphraseData.EvalNouns);
+        allow.UnionWith(ParaphraseData.EvalNounsSubject); allow.UnionWith(ParaphraseData.GenericNouns);
+        var adv = new Dictionary<string, int>(); var advOrder = new List<string>();
+        var ev = new Dictionary<string, int>(); var evOrder = new List<string>();
+        foreach (var d in docs.Take(400))
+        {
+            string txt = d.OutputText.Trim();
+            try
+            {
+                foreach (var (form, tag) in kiwi.Tokenize(txt))
+                    if (tag == "MAG" && form.Length is >= 2 and <= 6)
+                    { if (!adv.ContainsKey(form)) advOrder.Add(form); adv[form] = adv.GetValueOrDefault(form, 0) + 1; }
+            }
+            catch { }
+            foreach (var c in SplitClauses(txt, kiwi))
+                if (c.Length is >= 4 and <= 15 && allow.Any(e => c.Contains(e)))
+                { if (!ev.ContainsKey(c)) evOrder.Add(c); ev[c] = ev.GetValueOrDefault(c, 0) + 1; }
+        }
+        List<string> Top(Dictionary<string, int> m, List<string> ord) =>
+            ord.OrderByDescending(k => m[k]).ThenBy(k => ord.IndexOf(k)).Take(6).ToList();
+        return (Top(adv, advOrder), Top(ev, evOrder));
+    }
+
+    /// <summary>app/paraphrase.py _style_anchors — 교사 유사 문장을 절 단위 서술 표현으로.</summary>
+    public static List<string> StyleAnchors(MemoryStore store, string areaKey, string subject, string query, IKiwi kiwi, int k = 4)
+    {
+        if (areaKey.Length == 0) return new();
+        List<MemoryStore.Example> rows;
+        try { rows = store.Retrieve(areaKey, query, k, subject); } catch { return new(); }
+        string qn = query.Replace(" ", "");
+        var palette = new List<string>(); var seen = new HashSet<string>();
+        foreach (var r in rows)
+        {
+            string t = (r.OutputText ?? "").Trim();
+            if (t.Length == 0) continue;
+            foreach (var c in SplitClauses(t, kiwi))
+            {
+                string key = c.Replace(" ", "");
+                if (key.Length > 0 && key != qn && seen.Add(key)) palette.Add(c);
+            }
+        }
+        return palette.Take(8).ToList();
+    }
+
+    /// <summary>app/paraphrase.py _structure_profile — 교사 구조 패턴 프로파일(부족하면 기본값).</summary>
+    public static Dictionary<string, (string, double)[]> StructureProfile(MemoryStore store, string areaKey, string subject, IKiwi kiwi)
+    {
+        if (areaKey.Length == 0) return Patterns.DefaultProfile;
+        var docs = store.RowsForArea(areaKey);
+        if (subject.Length > 0)
+        {
+            var sub = docs.Where(d => d.Subject.Length > 0 && (subject.Contains(d.Subject) || d.Subject.Contains(subject))).ToList();
+            if (sub.Count > 0) docs = sub;
+        }
+        return Patterns.Analyze(docs.Take(400).Select(d => d.OutputText).ToList());
     }
 
     /// <summary>app/paraphrase.py _build_system — LLM용 시스템 프롬프트.</summary>
