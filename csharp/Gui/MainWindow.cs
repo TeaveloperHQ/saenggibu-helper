@@ -103,6 +103,14 @@ public class MainWindow : Window
         // 탭 스트립(영역/학급): 아이템을 탭처럼 여백
         Styles.Add(St(x => x.OfType<ListBox>().Class("tabs").Descendant().OfType<ListBoxItem>(),
             (ListBoxItem.PaddingProperty, new Thickness(12, 6)), (ListBoxItem.MarginProperty, new Thickness(0, 0, 3, 3))));
+        // 엑셀식 그리드 머리글(열·행) 회색 강조
+        Styles.Add(St(x => x.OfType<DataGridColumnHeader>(),
+            (DataGridColumnHeader.BackgroundProperty, Brush.Parse("#eef0f3")),
+            (DataGridColumnHeader.FontWeightProperty, FontWeight.SemiBold),
+            (DataGridColumnHeader.HorizontalContentAlignmentProperty, HorizontalAlignment.Center),
+            (DataGridColumnHeader.PaddingProperty, new Thickness(6, 3)),
+            (DataGridColumnHeader.SeparatorBrushProperty, Brush.Parse("#c8ccd2"))));
+        Styles.Add(St(x => x.OfType<DataGridCell>(), (DataGridCell.PaddingProperty, new Thickness(6, 2))));
     }
 
     // ── 생성 모드 = 영역 탭 + 입력/옵션/형태소/규정 + 체크박스 시트(파이썬 동일) ──
@@ -166,10 +174,21 @@ public class MainWindow : Window
         var addClass = new Button { Content = "＋ 학급" };
         string CurClass() => classStrip.SelectedItem as string ?? "";
         var rows = new ObservableCollection<RowVm>();
-        var grid = new DataGrid { ItemsSource = rows, AutoGenerateColumns = false, IsReadOnly = false, GridLinesVisibility = DataGridGridLinesVisibility.All };
-        grid.Columns.Add(new DataGridCheckBoxColumn { Header = "✓", Binding = new Binding("Checked") { Mode = BindingMode.TwoWay }, Width = new DataGridLength(40) });
-        grid.Columns.Add(new DataGridTextColumn { Header = "학번", Binding = new Binding("Num"), Width = new DataGridLength(64) });
-        grid.Columns.Add(new DataGridTextColumn { Header = "이름", Binding = new Binding("Name"), Width = new DataGridLength(84) });
+        var grid = new DataGrid
+        {
+            ItemsSource = rows, AutoGenerateColumns = false, IsReadOnly = false,
+            GridLinesVisibility = DataGridGridLinesVisibility.All,
+            HeadersVisibility = DataGridHeadersVisibility.All,   // 열 + 행 머리글(엑셀식)
+            RowHeight = 26, RowHeaderWidth = 40,
+            CanUserResizeColumns = true, CanUserSortColumns = false,
+            SelectionMode = DataGridSelectionMode.Extended,
+            BorderThickness = new Thickness(1), BorderBrush = Brush.Parse("#b5b5b5"),
+            HorizontalGridLinesBrush = Brush.Parse("#d9d9d9"), VerticalGridLinesBrush = Brush.Parse("#d9d9d9"),
+        };
+        grid.LoadingRow += (_, e) => e.Row.Header = (e.Row.GetIndex() + 1).ToString();  // 행 번호
+        grid.Columns.Add(new DataGridCheckBoxColumn { Header = "✓", Binding = new Binding("Checked") { Mode = BindingMode.TwoWay }, Width = new DataGridLength(34) });
+        grid.Columns.Add(new DataGridTextColumn { Header = "학번", Binding = new Binding("Num"), Width = new DataGridLength(60) });
+        grid.Columns.Add(new DataGridTextColumn { Header = "이름", Binding = new Binding("Name"), Width = new DataGridLength(80) });
         grid.Columns.Add(new DataGridTextColumn { Header = "내용", Binding = new Binding("Content"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
         var sheetMsg = new TextBlock { Foreground = Brush.Parse("#666") };
         void LoadRows() { rows.Clear(); foreach (var (nu, na, co) in RosterData.ReadRows(_dataDir, Area().Key, CurClass())) rows.Add(new RowVm { Num = nu, Name = na, Content = co }); for (int i = rows.Count; i < 20; i++) rows.Add(new RowVm()); }
