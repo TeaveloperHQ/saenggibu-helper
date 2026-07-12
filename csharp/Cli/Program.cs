@@ -96,6 +96,19 @@ if (args.Length > 0 && args[0] == "josatest")
     return 0;
 }
 
+// 서브커맨드: gen <ggufModel> <kiwiModel> <sentence> <n> — llm_paraphrase 전체 흐름 실구동
+if (args.Length > 0 && args[0] == "gen")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    using var kiwi = new KiwiNative(args[2]);
+    using var engine = new Cli.LlamaEngine(args[1]);
+    var res = Paraphrase.LlmParaphrase(args[3], int.Parse(args[4]), engine, kiwi,
+        Array.Empty<string>(), Array.Empty<string>());
+    Console.WriteLine($"[{res.Count}개 변형]");
+    foreach (var v in res) Console.WriteLine("· " + v);
+    return 0;
+}
+
 // 서브커맨드: plantest <n> <seed> — patterns.plan/instruction 파리티
 if (args.Length > 0 && args[0] == "plantest")
 {

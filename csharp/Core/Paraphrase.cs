@@ -6,6 +6,12 @@ namespace Saenggibu;
 /// 형태소 분석기(kiwi) 추상화 — 1단계에선 미구현(null 폴백). 2단계에서 P/Invoke로 구현.
 /// app/spellcheck.py 의 _get_kiwi + kiwi.tokenize/join 자리.
 /// </summary>
+/// <summary>LLM 완성 엔진 추상화(app/engine.py complete). 구현은 LLamaSharp(Cli.LlamaEngine).</summary>
+public interface ILlmEngine
+{
+    string Complete(string system, string user, int maxTokens, double temperature);
+}
+
 public interface IKiwi
 {
     IReadOnlyList<(string form, string tag)> Tokenize(string text);
@@ -582,6 +588,104 @@ public static class Paraphrase
         int missing = allk.Count(t => !norm.Contains(t.Replace(" ", ""), StringComparison.Ordinal)
             && !(ParaphraseData.NounMap.TryGetValue(t, out var s) && s.Any(x => norm.Contains(x, StringComparison.Ordinal))));
         return missing <= Math.Max(1, allk.Count / 5);
+    }
+
+    /// <summary>app/paraphrase.py llm_paraphrase — LLM 의미보존 변형 n개(신규 교사=개인화 없음).
+    /// 다문장은 _recombine 우선, 부족분은 _mechanical 보충. LLM층은 백엔드 차로 비결정.</summary>
+    public static List<string> LlmParaphrase(string sentence, int n, ILlmEngine engine, IKiwi kiwi,
+        IReadOnlyCollection<string> glossaryTerms, IReadOnlyList<string> rejected, string subject = "",
+        Func<string, bool>? emitProgress = null)
+    {
+        sentence = (sentence ?? "").Trim();
+        if (sentence.Length == 0) return new List<string>();
+
+        var longSents = SplitSentsDot(sentence).Where(s => s.Length >= 8).ToList();
+        if (longSents.Count >= 2)
+        {
+            var recombined = RecombineParaphrase(sentence, n, kiwi, glossaryTerms, rejected);
+            if (recombined.Count >= Math.Max(2, Math.Min(n, 3))) return recombined;
+        }
+
+        var (masked, mapping) = MaskTerms(sentence, kiwi, glossaryTerms);
+        var placeholders = mapping.Select(m => m.ph).ToList();
+        var (allk0, crit0) = Nouns(masked, kiwi, glossaryTerms);
+        var allk = Dedup(allk0.Concat(placeholders));
+        var crit = Dedup(crit0.Concat(placeholders));
+        var structPlan = Patterns.Plan(n, Patterns.DefaultProfile, new PyRandom(SeedOf(sentence)));
+        string system = BuildSystem(allk);
+        int per = Math.Min(Math.Max(3, n), 6);
+        double[] temps = { 0.8, 0.95, 1.05, 0.85, 1.0, 1.1 };
+
+        var origBlock = new HashSet<string>(Compliance.Check(sentence).Where(x => x.level == "block").Select(x => x.token));
+        var results = new List<string>();
+        var seen = new HashSet<string> { sentence.Replace(" ", "") };
+
+        void Accept(string v, double mut = 0.90)
+        {
+            v = FixJosaRo(v, kiwi);
+            string key = v.Replace(" ", "");
+            if (seen.Contains(key)) return;
+            if (Compliance.Check(v).Any(x => x.level == "block" && !origBlock.Contains(x.token))) return;
+            if (rejected.Any(rj => TooSimilar(v, rj, 0.9))) return;
+            if (results.Any(a => TooSimilar(v, a, mut))) return;
+            seen.Add(key); results.Add(v);
+        }
+
+        int rounds = Math.Max(6, (n + per - 1) / per + 3);
+        for (int r = 0; r < rounds; r++)
+        {
+            if (results.Count >= n) break;
+            emitProgress?.Invoke($"문장 변형 중… ({results.Count}/{n})");
+            string avoidBlock = "";
+            if (results.Count > 0)
+            {
+                var prev = results.Select(x => MaskTerms(x, kiwi, glossaryTerms).masked);
+                avoidBlock = "아래는 이미 만든 표현이다. 이것들과 다르게 만들어라 — 다른 부사나 " +
+                    "관용 표현을 쓰거나 서술어·어순을 바꿔라:\n" + string.Join("\n", prev.Select(p => "- " + p)) + "\n\n";
+            }
+            int baseIdx = r * per;
+            var targets = Enumerable.Range(0, per).Select(k => structPlan[(baseIdx + k) % structPlan.Count]).ToList();
+            string structBlock = "아래 지정한 '서로 다른 문장 구조'로 하나씩 만들어라. 부사만 바꾸지 말고 " +
+                "문장 구성·종결 방식·절 연결을 지시대로 바꿔라:\n" +
+                string.Join("\n", targets.Select((t, k) => $"{k + 1}) {Patterns.Instruction(t)}")) + "\n\n";
+            string user = avoidBlock + structBlock + $"원문: {masked}\n\n" +
+                $"원문의 명사(대상·소재)는 그대로 두고, 서로 다른 표현 {per}가지를 한 줄에 하나씩 출력해라.\n" +
+                "- 부사나 생기부 관용 표현을 덧붙이거나 서술어를 바꿔 문장을 서로 다르게 만든다.\n" +
+                "- 고유명사·전문용어·숫자는 절대 바꾸지 않는다.\n" +
+                "- 원문에 없는 새로운 사실·소재는 지어내지 않는다. 설명·머리말 없이 문장만 쓴다.";
+            string outp;
+            try { outp = engine.Complete(system, user, 64 + per * (masked.Length / 2 + 24), temps[r % temps.Length]); }
+            catch { break; }
+            foreach (var line in outp.Split('\n'))
+            {
+                string v = CleanLine(line);
+                if (v.Length == 0) continue;
+                v = Postprocess.ToNominalEndings(FixSpacing(v));
+                if (!Valid(v, allk, crit, masked, kiwi, glossaryTerms)) continue;
+                v = Unmask(v, mapping);
+                Accept(v);
+                if (results.Count >= n) break;
+            }
+        }
+
+        void Fill(double simThresh)
+        {
+            foreach (var v0 in Mechanical(masked, n * 2, kiwi, 42, subject))
+            {
+                if (results.Count >= n) return;
+                if (!Valid(v0, allk, crit, masked, kiwi, glossaryTerms, simThresh)) continue;
+                Accept(Unmask(v0, mapping));
+            }
+        }
+        if (results.Count < n) Fill(0.90);
+        if (results.Count < Math.Min(n, 3)) Fill(0.97);
+        if (results.Count == 0)
+            foreach (var v0 in Mechanical(masked, n, kiwi, 42, subject))
+            {
+                string v = Unmask(v0, mapping);
+                if (v.Replace(" ", "") != sentence.Replace(" ", "")) { results.Add(v); break; }
+            }
+        return results.Take(n).ToList();
     }
 
     /// <summary>app/paraphrase.py _build_system — LLM용 시스템 프롬프트.</summary>
