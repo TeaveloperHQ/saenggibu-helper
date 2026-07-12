@@ -170,9 +170,10 @@ public class MainWindow : Window
                 var outv = await Task.Run(() =>
                 {
                     EnsureEngines();
+                    var rej = _store.RejectedTexts(areaSpec.Key);
                     return gen
                         ? Paraphrase.GenerateFromKeywords(areaSpec, _store, _engine!, _kiwi!, subj, text, toneT, lenT, n, terms)
-                        : Paraphrase.LlmParaphrase(text, n, _engine!, _kiwi!, terms, Array.Empty<string>(), subj);
+                        : Paraphrase.LlmParaphrase(text, n, _engine!, _kiwi!, terms, rej, subj);
                 });
                 for (int i = 0; i < checkedRows.Count && i < outv.Count; i++) checkedRows[i].Content = outv[i];
                 grid.ItemsSource = null; grid.ItemsSource = rows;   // 표 갱신
@@ -199,23 +200,33 @@ public class MainWindow : Window
         var exportX = new Button { Content = "엑셀 내보내기" };
         exportX.Click += async (_, _) => { var f = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions { SuggestedFileName = "명단.xlsx", DefaultExtension = "xlsx" }); if (f == null) return; try { Importer.WriteXlsx(f.Path.LocalPath, rows.Select(r => (r.Num, r.Name, r.Content))); sheetMsg.Text = "내보냄: " + f.Name; } catch (Exception ex) { sheetMsg.Text = "오류:" + ex.Message; } };
 
-        // 레이아웃
+        // 셀 우클릭 '버리기'(부정 학습) + Ctrl+휠 확대/축소
+        var reject = new MenuItem { Header = "이 문장 버리기(부정 학습)" };
+        reject.Click += (_, _) => { if (grid.SelectedItem is RowVm r && r.Content.Trim().Length > 0) { _store.AddRejection(Area().Key, subject.IsVisible ? (subject.Text ?? "") : "", r.Content); r.Content = ""; grid.ItemsSource = null; grid.ItemsSource = rows; sheetMsg.Text = "버림 — 다음 생성에서 회피합니다."; } };
+        grid.ContextMenu = new ContextMenu { ItemsSource = new[] { reject } };
+        grid.PointerWheelChanged += (_, e) => { if (e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Control)) { grid.FontSize = Math.Clamp(grid.FontSize + (e.Delta.Y > 0 ? 1 : -1), 9, 28); e.Handled = true; } };
+
+        // 레이아웃: 위 패널(입력·옵션) + 시트. 전체화면은 위 패널 숨김.
         Control HRow(params Control[] cs) { var p = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 }; foreach (var c in cs) p.Children.Add(c); return p; }
-        var g = new Grid { Margin = new Thickness(14), RowDefinitions = new RowDefinitions("Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*") };
-        void Put(Control c, int r) { Grid.SetRow(c, r); g.Children.Add(c); }
-        Put(areaStrip, 0);
-        Put(HRow(new TextBlock { Text = "과목", VerticalAlignment = VerticalAlignment.Center }, subject, genOpts, new Control { Width = 12 }, learnLabel), 1);
-        Put(new TextBlock { Text = "입력 (키워드·관찰 메모)", Margin = new Thickness(0, 6, 0, 0) }, 2);
-        Put(input, 3);
-        Put(morphBox, 4);
-        Put(compliance, 5);
-        Put(HRow(legend, termBtn), 6);
-        Put(HRow(mode, genBtn, status), 7);
-        Put(new TextBlock { Text = "학급 표 (체크된 행에 채워짐 · 엑셀 가져오기/내보내기)", FontWeight = FontWeight.Bold, Margin = new Thickness(0, 8, 0, 0) }, 8);
-        Put(HRow(new TextBlock { Text = "학급", VerticalAlignment = VerticalAlignment.Center }, classBox, addRow, saveSheet, importX, exportX), 9);
-        Put(sheetMsg, 10);
-        Put(grid, 11);
-        return g;
+        var fsBtn = new Button { Content = "⛶ 전체화면" };
+        var topPanel = new StackPanel { Spacing = 6, Children = {
+            areaStrip,
+            HRow(new TextBlock { Text = "과목", VerticalAlignment = VerticalAlignment.Center }, subject, genOpts, new Control { Width = 12 }, learnLabel),
+            new TextBlock { Text = "입력 (키워드·관찰 메모)", Margin = new Thickness(0, 6, 0, 0) }, input, morphBox, compliance,
+            HRow(legend, termBtn), HRow(mode, genBtn, status) } };
+        bool fs = false;
+        fsBtn.Click += (_, _) => { fs = !fs; topPanel.IsVisible = !fs; fsBtn.Content = fs ? "⤢ 원래대로" : "⛶ 전체화면"; };
+
+        var sheet = new DockPanel();
+        sheet.Children.Add(Docked(new TextBlock { Text = "학급 표 (체크된 행에 채워짐 · 우클릭 '버리기' · Ctrl+휠 확대)", FontWeight = FontWeight.Bold, Margin = new Thickness(0, 8, 0, 4) }, Dock.Top));
+        sheet.Children.Add(Docked(HRow(new TextBlock { Text = "학급", VerticalAlignment = VerticalAlignment.Center }, classBox, addRow, saveSheet, importX, exportX, fsBtn), Dock.Top));
+        sheet.Children.Add(Docked(sheetMsg, Dock.Top));
+        sheet.Children.Add(grid);
+
+        var root = new DockPanel { Margin = new Thickness(14) };
+        root.Children.Add(Docked(topPanel, Dock.Top));
+        root.Children.Add(sheet);
+        return root;
     }
 
     private void RememberSubject(string subj)

@@ -52,6 +52,30 @@ public sealed class MemoryStore : IDisposable
         return (long)(cmd.ExecuteScalar() ?? 0L);
     }
 
+    /// <summary>app/memory_store.py add_rejection — 버린 표현을 부정 예시(rating=-1)로. 중복 제외.</summary>
+    public long AddRejection(string area, string subject, string outputText)
+    {
+        var t = (outputText ?? "").Trim();
+        if (t.Length == 0) return 0;
+        using (var dup = _conn.CreateCommand())
+        {
+            dup.CommandText = "SELECT 1 FROM examples WHERE area=$a AND output_text=$o AND rating<0 LIMIT 1";
+            dup.Parameters.AddWithValue("$a", area); dup.Parameters.AddWithValue("$o", t);
+            if (dup.ExecuteScalar() != null) return 0;
+        }
+        return AddExample(area, subject, "", t, -1);
+    }
+
+    /// <summary>버린 변형(rating&lt;0) — 생성 시 회피용.</summary>
+    public List<string> RejectedTexts(string area, int limit = 300)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT output_text FROM examples WHERE area=$a AND rating<0 ORDER BY created_at DESC LIMIT $l";
+        cmd.Parameters.AddWithValue("$a", area); cmd.Parameters.AddWithValue("$l", limit);
+        var outp = new List<string>(); using var r = cmd.ExecuteReader(); while (r.Read()) outp.Add(r.GetString(0));
+        return outp;
+    }
+
     public int Count(string? area = null)
     {
         using var cmd = _conn.CreateCommand();
