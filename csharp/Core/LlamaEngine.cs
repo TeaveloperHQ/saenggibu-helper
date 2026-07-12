@@ -25,11 +25,20 @@ public sealed class LlamaEngine : ILlmEngine, IDisposable
         _weights = LLamaWeights.LoadFromFile(_mp);
     }
 
-    public string Complete(string system, string user, int maxTokens, double temperature)
+    public string Complete(string system, string user, int maxTokens, double temperature) =>
+        Run($"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n",
+            maxTokens, temperature);
+
+    public string CompleteMessages(IReadOnlyList<Engine.Message> messages, int maxTokens, double temperature)
     {
-        string prompt =
-            $"<|im_start|>system\n{system}<|im_end|>\n" +
-            $"<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n";
+        var sb = new StringBuilder();
+        foreach (var m in messages) sb.Append($"<|im_start|>{m.Role}\n{m.Content}<|im_end|>\n");
+        sb.Append("<|im_start|>assistant\n");
+        return Run(sb.ToString(), maxTokens, temperature);
+    }
+
+    private string Run(string prompt, int maxTokens, double temperature)
+    {
         var ex = new StatelessExecutor(_weights, _mp);
         var ip = new InferenceParams
         {

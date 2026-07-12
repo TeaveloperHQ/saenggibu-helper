@@ -6,10 +6,12 @@ namespace Saenggibu;
 /// 형태소 분석기(kiwi) 추상화 — 1단계에선 미구현(null 폴백). 2단계에서 P/Invoke로 구현.
 /// app/spellcheck.py 의 _get_kiwi + kiwi.tokenize/join 자리.
 /// </summary>
-/// <summary>LLM 완성 엔진 추상화(app/engine.py complete). 구현은 LLamaSharp(Cli.LlamaEngine).</summary>
+/// <summary>LLM 완성 엔진 추상화(app/engine.py complete). 구현은 LLamaSharp(LlamaEngine).</summary>
 public interface ILlmEngine
 {
     string Complete(string system, string user, int maxTokens, double temperature);
+    /// <summary>메시지 목록(시스템+few-shot+유저)으로 완성 — 키워드 생성용.</summary>
+    string CompleteMessages(IReadOnlyList<Engine.Message> messages, int maxTokens, double temperature);
 }
 
 public interface IKiwi
@@ -768,6 +770,25 @@ public static class Paraphrase
             if (sub.Count > 0) docs = sub;
         }
         return Patterns.Analyze(docs.Take(400).Select(d => d.OutputText).ToList());
+    }
+
+    /// <summary>키워드로 새 문장 생성(area few-shot) 후 변형으로 N개 확장.</summary>
+    public static List<string> GenerateFromKeywords(AreaSpec area, MemoryStore store, ILlmEngine engine, IKiwi kiwi,
+        string subject, string keywords, string tone, string lengthHint, int n, IReadOnlyCollection<string> glossaryTerms)
+    {
+        keywords = (keywords ?? "").Trim();
+        if (keywords.Length == 0) return new();
+        var msgs = Engine.BuildMessages(area, store, subject, keywords, tone, lengthHint, 1);
+        string raw = engine.CompleteMessages(msgs, Config.DefaultMaxTokens, Config.DefaultTemperature);
+        // 지시문 에코 제거 + 명사형 종결 정규화
+        var lines = raw.Split('\n').Select(CleanLine).Where(s => s.Length > 0 && !Postprocess.HasPromptEcho(s));
+        string sent = Postprocess.ToNominalEndings(string.Join(" ", lines)).Trim();
+        if (sent.Length == 0) return new();
+        if (n <= 1) return new List<string> { sent };
+        var vars = LlmParaphrase(sent, n, engine, kiwi, glossaryTerms, Array.Empty<string>(), subject);
+        var outp = new List<string> { sent };
+        foreach (var v in vars) if (v.Replace(" ", "") != sent.Replace(" ", "")) outp.Add(v);
+        return outp.Take(n).ToList();
     }
 
     /// <summary>app/paraphrase.py _build_system — LLM용 시스템 프롬프트.</summary>

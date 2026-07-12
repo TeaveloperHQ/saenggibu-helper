@@ -63,6 +63,50 @@ public static class RosterData
         return outp;
     }
 
+    /// <summary>영역 로스터의 학급 이름 목록.</summary>
+    public static List<string> ClassNames(string dir, string area)
+    {
+        var path = Path.Combine(dir, $"roster_{area}.json");
+        if (!File.Exists(path)) return new();
+        try { return (JsonNode.Parse(File.ReadAllText(path)) as JsonObject)?.Select(kv => kv.Key).ToList() ?? new(); }
+        catch { return new(); }
+    }
+
+    /// <summary>학급 시트 행 읽기 → (학번, 이름, 내용) 리스트.</summary>
+    public static List<(string num, string name, string content)> ReadRows(string dir, string area, string klass)
+    {
+        var outp = new List<(string, string, string)>();
+        var path = Path.Combine(dir, $"roster_{area}.json");
+        if (!File.Exists(path)) return outp;
+        try
+        {
+            if (JsonNode.Parse(File.ReadAllText(path)) is JsonObject o && o[klass] is JsonObject e && e["rows"] is JsonArray rows)
+                foreach (var r in rows)
+                    if (r is JsonArray row)
+                        outp.Add((row.Count > 0 ? row[0]?.GetValue<string>() ?? "" : "",
+                                  row.Count > 1 ? row[1]?.GetValue<string>() ?? "" : "",
+                                  row.Count > 2 ? row[2]?.GetValue<string>() ?? "" : ""));
+        }
+        catch { }
+        return outp;
+    }
+
+    /// <summary>학급 시트 저장(학번·이름·내용). 빈 행 제외.</summary>
+    public static void WriteRows(string dir, string area, string klass, IEnumerable<(string num, string name, string content)> rows)
+    {
+        var path = Path.Combine(dir, $"roster_{area}.json");
+        JsonObject data;
+        try { data = (JsonNode.Parse(File.Exists(path) ? File.ReadAllText(path) : "{}") as JsonObject) ?? new(); }
+        catch { data = new(); }
+        var arr = new JsonArray();
+        foreach (var (num, name, content) in rows)
+            if (!(string.IsNullOrWhiteSpace(num) && string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(content)))
+                arr.Add(new JsonArray(num, name, content));
+        data[klass] = new JsonObject { ["headers"] = new JsonArray("내용"), ["rows"] = arr };
+        File.WriteAllText(path, data.ToJsonString(new JsonSerializerOptions
+        { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+    }
+
     /// <summary>app/roster_data.py add_memo_to_roster — 메모를 명단에 반영(등록 학급만).
     /// 학생 있으면 내용 이어붙임('append'), 없으면 행 삽입('insert'). 등록 안 된 학급='no_class'.</summary>
     public static string AddMemoToRoster(string dir, string area, string klass, string num, string name, string text)

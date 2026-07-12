@@ -70,6 +70,21 @@ public static class Importer
         return chunks.Select(c => c.Trim()).Where(c => c.Length >= minLen).ToList();
     }
 
+    /// <summary>학급 시트를 엑셀로 내보내기(학번·이름·내용).</summary>
+    public static void WriteXlsx(string path, IEnumerable<(string num, string name, string content)> rows)
+    {
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet("명단");
+        ws.Cell(1, 1).Value = "학번"; ws.Cell(1, 2).Value = "이름"; ws.Cell(1, 3).Value = "내용";
+        int r = 2;
+        foreach (var (num, name, content) in rows)
+        {
+            ws.Cell(r, 1).Value = num; ws.Cell(r, 2).Value = name; ws.Cell(r, 3).Value = content; r++;
+        }
+        ws.Columns().AdjustToContents();
+        wb.SaveAs(path);
+    }
+
     private static readonly string[] ContentHdr =
         { "특기사항", "세부능력", "행동특성", "종합의견", "내용", "기재", "특기", "의견" };
 

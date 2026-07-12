@@ -10,6 +10,9 @@ public static class Config
     public const string AppVersion = "0.1.0";
 
     public const string ModelFilename = "qwen2.5-7b-instruct-q4_k_m.gguf";
+    public const string ModelUrl =
+        "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf?download=true";
+    public const long ModelApproxBytes = 4_683_073_344L;
 
     // LLM 파라미터 (config.py 와 동일 기본값)
     public static readonly int NCtx = EnvInt("SGB_N_CTX", 4096);
