@@ -21,7 +21,6 @@ namespace Gui;
 
 public class RowVm
 {
-    public bool Checked { get; set; }
     public string Num { get; set; } = "";
     public string Name { get; set; } = "";
     public string Content { get; set; } = "";
@@ -163,8 +162,8 @@ public class MainWindow : Window
         mode.Items.Add("내 문장 변형(같은 의미)"); mode.Items.Add("키워드로 새로 생성"); mode.SelectedIndex = 0;
         void SyncMode() { genOpts.IsVisible = mode.SelectedIndex == 1; }
         mode.SelectionChanged += (_, _) => SyncMode(); SyncMode();
-        var genBtn = new Button { Content = "체크된 행 채우기", FontWeight = FontWeight.Bold, Padding = new Thickness(14, 6) };
-        var status = new TextBlock { Foreground = Brush.Parse("#666"), Text = "행을 체크하고 '체크된 행 채우기'를 누르세요.", VerticalAlignment = VerticalAlignment.Center };
+        var genBtn = new Button { Content = "선택한 행 채우기", FontWeight = FontWeight.Bold, Padding = new Thickness(14, 6) };
+        var status = new TextBlock { Foreground = Brush.Parse("#666"), Text = "행 번호(라벨)를 클릭해 선택하고 '선택한 행 채우기'를 누르세요.", VerticalAlignment = VerticalAlignment.Center };
 
         // 시트(학급 서브탭 + 체크박스 + 학번/이름/내용)
         var classStrip = new ListBox { SelectionMode = SelectionMode.Single, Background = Brushes.Transparent, MinWidth = 100 };
@@ -185,8 +184,7 @@ public class MainWindow : Window
             BorderThickness = new Thickness(1), BorderBrush = Brush.Parse("#b5b5b5"),
             HorizontalGridLinesBrush = Brush.Parse("#d9d9d9"), VerticalGridLinesBrush = Brush.Parse("#d9d9d9"),
         };
-        grid.LoadingRow += (_, e) => e.Row.Header = (e.Row.GetIndex() + 1).ToString();  // 행 번호
-        grid.Columns.Add(new DataGridCheckBoxColumn { Header = "✓", Binding = new Binding("Checked") { Mode = BindingMode.TwoWay }, Width = new DataGridLength(34) });
+        grid.LoadingRow += (_, e) => e.Row.Header = (e.Row.GetIndex() + 1).ToString();  // 행 번호(라벨)
         grid.Columns.Add(new DataGridTextColumn { Header = "학번", Binding = new Binding("Num"), Width = new DataGridLength(60) });
         grid.Columns.Add(new DataGridTextColumn { Header = "이름", Binding = new Binding("Name"), Width = new DataGridLength(80) });
         grid.Columns.Add(new DataGridTextColumn { Header = "내용", Binding = new Binding("Content"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
@@ -202,12 +200,12 @@ public class MainWindow : Window
 
         genBtn.Click += async (_, _) =>
         {
-            var checkedRows = rows.Where(r => r.Checked).ToList();
-            if (checkedRows.Count == 0) { status.Text = "채울 행을 먼저 체크하세요."; return; }
+            var selRows = grid.SelectedItems.Cast<RowVm>().OrderBy(r => rows.IndexOf(r)).ToList();
+            if (selRows.Count == 0) { status.Text = "채울 행을 먼저 선택하세요(왼쪽 행 번호 클릭 · Ctrl/Shift로 여러 개)."; return; }
             string text = (input.Text ?? "").Trim();
             if (text.Length == 0) { status.Text = "입력하세요."; return; }
-            genBtn.IsEnabled = false; status.Text = $"{checkedRows.Count}개 생성 중… (최초 로딩 수십 초)";
-            int n = checkedRows.Count;
+            genBtn.IsEnabled = false; status.Text = $"{selRows.Count}개 생성 중… (최초 로딩 수십 초)";
+            int n = selRows.Count;
             var areaSpec = Area(); bool gen = mode.SelectedIndex == 1;
             string subj = subject.IsVisible ? (subject.Text ?? "").Trim() : "";
             string toneT = tone.SelectedItem as string ?? ""; if (toneT == "기본") toneT = "";
@@ -224,10 +222,10 @@ public class MainWindow : Window
                         ? Paraphrase.GenerateFromKeywords(areaSpec, _store, _engine!, _kiwi!, subj, text, toneT, lenT, n, terms)
                         : Paraphrase.LlmParaphrase(text, n, _engine!, _kiwi!, terms, rej, subj);
                 });
-                for (int i = 0; i < checkedRows.Count && i < outv.Count; i++) checkedRows[i].Content = outv[i];
+                for (int i = 0; i < selRows.Count && i < outv.Count; i++) selRows[i].Content = outv[i];
                 grid.ItemsSource = null; grid.ItemsSource = rows;   // 표 갱신
                 RememberSubject(subj);
-                status.Text = $"{Math.Min(outv.Count, checkedRows.Count)}개 채움. '시트 저장'하면 학습에 반영됩니다.";
+                status.Text = $"{Math.Min(outv.Count, selRows.Count)}개 채움. '저장'하면 학습에 반영됩니다.";
             }
             catch (Exception ex) { status.Text = "오류: " + ex.Message; }
             finally { genBtn.IsEnabled = true; }
@@ -260,6 +258,8 @@ public class MainWindow : Window
         var spellBtn = new Button { Content = "맞춤법 검사" };
         spellBtn.Click += async (_, _) => { string t = grid.SelectedItem is RowVm rr && rr.Content.Trim().Length > 0 ? rr.Content : (input.Text ?? "").Trim(); if (t.Length == 0) return; sheetMsg.Text = "네이버 맞춤법 검사 중…(온라인)"; var res = await Task.Run(() => Spellcheck.NaverSpellcheck(t)); sheetMsg.Text = res == null ? "맞춤법 검사 실패(오프라인/차단)." : $"교정: {res.Value.corrected} (오류 {res.Value.errata})"; };
         var colCombo = new ComboBox { MinWidth = 100 }; colCombo.Items.Add("내용"); colCombo.SelectedIndex = 0;
+        var selectAll = new CheckBox { Content = "전체 선택", VerticalAlignment = VerticalAlignment.Center };
+        selectAll.IsCheckedChanged += (_, _) => { if (selectAll.IsChecked == true) grid.SelectAll(); else grid.SelectedItems.Clear(); };
 
         // 레이아웃(파이썬 동일): 위 패널(입력·옵션) + 시트(학급탭줄 / 툴바 / 그리드)
         Control HRow(params Control[] cs) { var p = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 }; foreach (var c in cs) p.Children.Add(c); return p; }
@@ -273,10 +273,10 @@ public class MainWindow : Window
         bool fs = false;
         fsBtn.Click += (_, _) => { fs = !fs; topPanel.IsVisible = !fs; fsBtn.Content = fs ? "원래대로" : "전체화면"; };
 
-        var hint = new TextBlock { Text = "행 클릭=선택 · 좌측 ✓=체크 · 우클릭=버리기 · Ctrl+휠=확대/축소", Foreground = Brush.Parse("#999"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+        var hint = new TextBlock { Text = "행 번호 클릭=선택 · Ctrl/Shift=여러 개 · 우클릭=버리기 · Ctrl+휠=확대/축소", Foreground = Brush.Parse("#999"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
         var sheet = new DockPanel();
         sheet.Children.Add(Docked(Bar(HRow(new TextBlock { Text = "학급", VerticalAlignment = VerticalAlignment.Center }, classStrip, newClass, addClass), fsBtn), Dock.Top));
-        sheet.Children.Add(Docked(Bar(HRow(new TextBlock { Text = "생성 대상 열", VerticalAlignment = VerticalAlignment.Center }, colCombo, hint), HRow(spellBtn, importX, exportX, saveSheet)), Dock.Top));
+        sheet.Children.Add(Docked(Bar(HRow(selectAll, colCombo, hint), HRow(spellBtn, importX, exportX, saveSheet)), Dock.Top));
         sheet.Children.Add(Docked(sheetMsg, Dock.Top));
         sheet.Children.Add(grid);
 
