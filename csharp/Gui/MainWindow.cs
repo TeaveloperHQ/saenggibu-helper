@@ -343,6 +343,30 @@ public class MainWindow : Window
             grid.Columns[2].Header = contentLabel;
             RebuildExtraColumns();
             RefreshColCombo(true);   // 로드 시 기본 = 내용 가장 많은 열
+            // 저장된 보기 상태(열 고정·숨김·너비·행높이) 복원
+            rowHeights.Clear(); grid.FrozenColumnCount = 0;
+            foreach (var c in grid.Columns) c.IsVisible = true;
+            if (CurClass() is { Length: > 0 } vc && vc != "＋")
+            {
+                var view = RosterData.ReadSheetView(_dataDir, Area().Key, vc);
+                for (int i = 0; i < grid.Columns.Count; i++)
+                {
+                    if (view.hidden.Contains(i)) grid.Columns[i].IsVisible = false;
+                    if (i < view.colWidths.Count && view.colWidths[i] > 0) grid.Columns[i].Width = new DataGridLength(view.colWidths[i]);
+                }
+                grid.FrozenColumnCount = Math.Clamp(view.frozen, 0, Math.Max(0, grid.Columns.Count - 1));
+                foreach (var kv in view.rowHeights) if (kv.Key < rows.Count) rowHeights[rows[kv.Key]] = kv.Value;
+            }
+            UpdateHideMarkers();
+        }
+        void SaveView()   // 보기 상태를 roster JSON에 저장(세션 넘어 유지)
+        {
+            string k = CurClass(); if (k.Length == 0 || k == "＋") return;
+            var hidden = Enumerable.Range(0, grid.Columns.Count).Where(i => !grid.Columns[i].IsVisible).ToList();
+            var widths = grid.Columns.Select(c => c.Width.IsAbsolute ? c.Width.Value : c.ActualWidth).ToList();
+            var rh = new Dictionary<int, double>();
+            foreach (var kv in rowHeights) { int idx = rows.IndexOf(kv.Key); if (idx >= 0) rh[idx] = kv.Value; }
+            RosterData.WriteSheetView(_dataDir, Area().Key, k, grid.FrozenColumnCount, hidden, widths, rh);
         }
         void ReloadSheet()
         {
@@ -427,6 +451,7 @@ public class MainWindow : Window
             string k = CurClass(); if (k.Length == 0 || k == "＋") { sheetMsg.Text = "저장할 학급 탭을 선택하세요(없으면 ＋ 로 추가)."; return; }
             RosterData.WriteRowsExtended(_dataDir, Area().Key, k, contentLabel, extraCols,
                 rows.Select(r => (r.Num, r.Name, r.Content, (IReadOnlyList<string>)extraCols.Select(c => r[c.id]).ToList())));
+            SaveView();   // 열 고정·숨김·너비·행높이도 함께 저장
             int learned = 0; foreach (var r in rows) if (r.Content.Trim().Length > 0) { _store.AddExample(Area().Key, subject.IsVisible ? (subject.Text ?? "").Trim() : "", r.Name, r.Content); learned++; }
             sheetMsg.Text = $"'{k}' 저장 · {learned}건 학습 반영."; RefreshLearn();
             if (_learnStatus != null) _learnStatus.Text = $"학습 예시: 총 {_store.Count()}건";
@@ -502,13 +527,13 @@ public class MainWindow : Window
         var miColDel = new MenuItem { Header = "열 삭제" };
         miColDel.Click += (_, _) => DeleteCol(ctxColIdx);
         var miColHide = new MenuItem { Header = "열 숨기기" };
-        miColHide.Click += (_, _) => { if (ctxColIdx >= 0 && ctxColIdx < grid.Columns.Count) { grid.Columns[ctxColIdx].IsVisible = false; UpdateHideMarkers(); Refresh(); } };
+        miColHide.Click += (_, _) => { if (ctxColIdx >= 0 && ctxColIdx < grid.Columns.Count) { grid.Columns[ctxColIdx].IsVisible = false; UpdateHideMarkers(); Refresh(); SaveView(); } };
         var miColUnhide = new MenuItem { Header = "숨긴 열 모두 표시" };
-        miColUnhide.Click += (_, _) => { foreach (var c in grid.Columns) c.IsVisible = true; UpdateHideMarkers(); Refresh(); };
+        miColUnhide.Click += (_, _) => { foreach (var c in grid.Columns) c.IsVisible = true; UpdateHideMarkers(); Refresh(); SaveView(); };
         var miColFreeze = new MenuItem { Header = "여기까지 열 고정" };   // 엑셀식 틀 고정(가로 스크롤 시 왼쪽 유지)
-        miColFreeze.Click += (_, _) => { if (ctxColIdx >= 0) grid.FrozenColumnCount = Math.Clamp(ctxColIdx + 1, 1, grid.Columns.Count - 1); };
+        miColFreeze.Click += (_, _) => { if (ctxColIdx >= 0) { grid.FrozenColumnCount = Math.Clamp(ctxColIdx + 1, 1, grid.Columns.Count - 1); SaveView(); } };
         var miColUnfreeze = new MenuItem { Header = "열 고정 해제" };
-        miColUnfreeze.Click += (_, _) => grid.FrozenColumnCount = 0;
+        miColUnfreeze.Click += (_, _) => { grid.FrozenColumnCount = 0; SaveView(); };
         var colItems = new Control[] { miColRename, miColLeft, miColRight, miColDel, new Separator(), miColFreeze, miColUnfreeze, new Separator(), miColHide, miColUnhide };
 
         // 행머리글 메뉴
@@ -640,7 +665,7 @@ public class MainWindow : Window
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         grid.AddHandler(InputElement.PointerReleasedEvent, (object? _, PointerReleasedEventArgs e) =>
         {
-            if (rowDragging) { rowDragging = false; dragRow = null; dragVm = null; e.Pointer.Capture(null); grid.Cursor = Cursor.Default; e.Handled = true; }
+            if (rowDragging) { rowDragging = false; dragRow = null; dragVm = null; e.Pointer.Capture(null); grid.Cursor = Cursor.Default; e.Handled = true; SaveView(); }
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         // 열 머리글 더블클릭 = 이름 변경(엑셀식) — RenameCol로 contentLabel·추가열 라벨 동기화
         grid.DoubleTapped += (_, e) =>

@@ -190,6 +190,46 @@ public static class RosterData
         { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
     }
 
+    /// <summary>시트 보기 상태(열 고정·숨김·너비·행높이) 읽기. 없으면 기본값.</summary>
+    public static (int frozen, HashSet<int> hidden, List<double> colWidths, Dictionary<int, double> rowHeights)
+        ReadSheetView(string dir, string area, string klass)
+    {
+        int frozen = 0; var hidden = new HashSet<int>(); var widths = new List<double>(); var rowH = new Dictionary<int, double>();
+        var path = Path.Combine(dir, $"roster_{area}.json");
+        if (!File.Exists(path)) return (frozen, hidden, widths, rowH);
+        try
+        {
+            if (JsonNode.Parse(File.ReadAllText(path)) is JsonObject o && o[klass] is JsonObject e && e["view"] is JsonObject v)
+            {
+                if (v["frozen"] is JsonNode fn) frozen = fn.GetValue<int>();
+                if (v["hidden"] is JsonArray ha) foreach (var n in ha) if (n != null) hidden.Add(n.GetValue<int>());
+                if (v["colw"] is JsonArray wa) foreach (var n in wa) widths.Add(n?.GetValue<double>() ?? 0);
+                if (v["rowh"] is JsonObject ro) foreach (var kv in ro) if (int.TryParse(kv.Key, out var ri) && kv.Value != null) rowH[ri] = kv.Value.GetValue<double>();
+            }
+        }
+        catch { }
+        return (frozen, hidden, widths, rowH);
+    }
+
+    /// <summary>시트 보기 상태 저장(기존 학급 항목의 'view' 키만 갱신). 학급 항목이 없으면 무시.</summary>
+    public static void WriteSheetView(string dir, string area, string klass, int frozen,
+        IEnumerable<int> hidden, IEnumerable<double> colWidths, IReadOnlyDictionary<int, double> rowHeights)
+    {
+        var path = Path.Combine(dir, $"roster_{area}.json");
+        if (!File.Exists(path)) return;
+        JsonObject data;
+        try { if (JsonNode.Parse(File.ReadAllText(path)) is not JsonObject o) return; else data = o; }
+        catch { return; }
+        if (data[klass] is not JsonObject entry) return;
+        var view = new JsonObject { ["frozen"] = frozen };
+        var ha = new JsonArray(); foreach (var i in hidden) ha.Add(i); view["hidden"] = ha;
+        var wa = new JsonArray(); foreach (var w in colWidths) wa.Add(w); view["colw"] = wa;
+        var ro = new JsonObject(); foreach (var kv in rowHeights) ro[kv.Key.ToString()] = kv.Value; view["rowh"] = ro;
+        entry["view"] = view;
+        File.WriteAllText(path, data.ToJsonString(new JsonSerializerOptions
+        { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+    }
+
     /// <summary>app/roster_data.py add_memo_to_roster — 메모를 명단에 반영(등록 학급만).
     /// 학생 있으면 내용 이어붙임('append'), 없으면 행 삽입('insert'). 등록 안 된 학급='no_class'.</summary>
     public static string AddMemoToRoster(string dir, string area, string klass, string num, string name, string text)
