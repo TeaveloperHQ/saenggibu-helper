@@ -6,8 +6,10 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -121,9 +123,17 @@ public class MainWindow : Window
             (DataGridColumnHeader.BackgroundProperty, Brush.Parse("#eef0f3")),
             (DataGridColumnHeader.FontWeightProperty, FontWeight.SemiBold),
             (DataGridColumnHeader.HorizontalContentAlignmentProperty, HorizontalAlignment.Center),
-            (DataGridColumnHeader.PaddingProperty, new Thickness(6, 3)),
+            (DataGridColumnHeader.PaddingProperty, new Thickness(4, 1)),
+            (DataGridColumnHeader.MinHeightProperty, 22.0),
             (DataGridColumnHeader.SeparatorBrushProperty, Brush.Parse("#c8ccd2"))));
-        Styles.Add(St(x => x.OfType<DataGridCell>(), (DataGridCell.PaddingProperty, new Thickness(6, 2))));
+        Styles.Add(St(x => x.OfType<DataGridCell>(), (DataGridCell.PaddingProperty, new Thickness(4, 0)),
+            (DataGridCell.MinHeightProperty, 0.0),
+            (DataGridCell.VerticalContentAlignmentProperty, VerticalAlignment.Center)));
+        Styles.Add(St(x => x.OfType<DataGridRow>(), (DataGridRow.MinHeightProperty, 0.0)));
+        // 셀 안 TextBlock 자체 여백 제거(엑셀식 밀착) — DataGridTextColumn 기본 좌측 여백 상쇄
+        Styles.Add(St(x => x.OfType<DataGridCell>().Descendant().OfType<TextBlock>(),
+            (TextBlock.MarginProperty, new Thickness(0)), (TextBlock.PaddingProperty, new Thickness(0)),
+            (TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center)));
     }
 
     // ── 생성 모드 = 영역 탭 + 입력/옵션/형태소/규정 + 체크박스 시트(파이썬 동일) ──
@@ -191,7 +201,7 @@ public class MainWindow : Window
             ItemsSource = rows, AutoGenerateColumns = false, IsReadOnly = false,
             GridLinesVisibility = DataGridGridLinesVisibility.All,
             HeadersVisibility = DataGridHeadersVisibility.All,   // 열 + 행 머리글(엑셀식)
-            RowHeight = 26, RowHeaderWidth = 40,
+            RowHeight = 22, RowHeaderWidth = 34,
             CanUserResizeColumns = true, CanUserSortColumns = false,
             ClipboardCopyMode = DataGridClipboardCopyMode.IncludeHeader,   // Ctrl+C 복사
             SelectionMode = DataGridSelectionMode.Extended,
@@ -278,7 +288,43 @@ public class MainWindow : Window
         var reject = new MenuItem { Header = "이 문장 버리기(부정 학습)" };
         reject.Click += (_, _) => { if (grid.SelectedItem is RowVm r && r.Content.Trim().Length > 0) { _store.AddRejection(Area().Key, subject.IsVisible ? (subject.Text ?? "") : "", r.Content); r.Content = ""; grid.ItemsSource = null; grid.ItemsSource = rows; sheetMsg.Text = "버림 — 다음 생성에서 회피합니다."; } };
         grid.ContextMenu = new ContextMenu { ItemsSource = new[] { reject } };
-        grid.PointerWheelChanged += (_, e) => { if (e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Control)) { grid.FontSize = Math.Clamp(grid.FontSize + (e.Delta.Y > 0 ? 1 : -1), 9, 28); grid.RowHeight = Math.Clamp(grid.RowHeight + (e.Delta.Y > 0 ? 2 : -2), 20, 60); e.Handled = true; } };
+
+        // ── 엑셀식 Ctrl+휠 = 시트 화면 확대/축소(줌) ──
+        var sheetZoom = new ScaleTransform(1, 1);
+        grid.RenderTransform = sheetZoom;
+        grid.RenderTransformOrigin = RelativePoint.TopLeft;
+        // 터널+handledEventsToo: 확대 후 내부 스크롤뷰가 휠을 삼켜 '축소가 안 되던' 문제 해결
+        grid.AddHandler(InputElement.PointerWheelChangedEvent, (object? _, PointerWheelEventArgs e) =>
+        {
+            if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+            double s = Math.Clamp(sheetZoom.ScaleX + (e.Delta.Y > 0 ? 0.1 : -0.1), 0.5, 2.5);
+            sheetZoom.ScaleX = s; sheetZoom.ScaleY = s; e.Handled = true;
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+
+        // ── 엑셀식 행 높이 = 행번호 라벨(행 머리글) 하단 경계 드래그 ──
+        var rowResize = new Cursor(StandardCursorType.SizeNorthSouth);
+        bool rowDragging = false; double dragStartY = 0, dragStartH = 0;
+        const double edge = 4;
+        grid.AddHandler(InputElement.PointerMovedEvent, (object? _, PointerEventArgs e) =>
+        {
+            if (rowDragging)
+            {
+                grid.RowHeight = Math.Clamp(dragStartH + (e.GetPosition(grid).Y - dragStartY) / sheetZoom.ScaleY, 16, 200);
+                e.Handled = true; return;
+            }
+            var hdr = (e.Source as Visual)?.FindAncestorOfType<DataGridRowHeader>();
+            grid.Cursor = (hdr != null && e.GetPosition(hdr).Y >= hdr.Bounds.Height - edge) ? rowResize : Cursor.Default;
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        grid.AddHandler(InputElement.PointerPressedEvent, (object? _, PointerPressedEventArgs e) =>
+        {
+            var hdr = (e.Source as Visual)?.FindAncestorOfType<DataGridRowHeader>();
+            if (hdr != null && e.GetPosition(hdr).Y >= hdr.Bounds.Height - edge)
+            { rowDragging = true; dragStartY = e.GetPosition(grid).Y; dragStartH = grid.RowHeight; e.Pointer.Capture(grid); e.Handled = true; }
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        grid.AddHandler(InputElement.PointerReleasedEvent, (object? _, PointerReleasedEventArgs e) =>
+        {
+            if (rowDragging) { rowDragging = false; e.Pointer.Capture(null); grid.Cursor = Cursor.Default; e.Handled = true; }
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         // 열 머리글 더블클릭 = 이름 변경(엑셀식)
         grid.DoubleTapped += (_, e) =>
         {
@@ -309,7 +355,7 @@ public class MainWindow : Window
         bool fs = false;
         fsBtn.Click += (_, _) => { fs = !fs; topPanel.IsVisible = !fs; fsBtn.Content = fs ? "원래대로" : "전체화면"; };
 
-        var hint = new TextBlock { Text = "행 번호 클릭=선택 · Ctrl/Shift=여러 개 · 우클릭=버리기 · Ctrl+휠=확대/축소", Foreground = Brush.Parse("#999"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
+        var hint = new TextBlock { Text = "행번호 클릭=선택 · Ctrl/Shift=여러 개 · 우클릭=버리기 · Ctrl+휠=화면 확대/축소 · 열머리글·행번호 경계 드래그=너비/높이", Foreground = Brush.Parse("#999"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
         Control MRow(double top, Control c) { c.Margin = new Thickness(0, top, 0, 0); return c; }
 
         // 시트 영역(파이썬 순서): 라벨 → 툴바(대상열·힌트 | 맞춤법·엑셀·저장) → 학급 탭(＋ · 전체화면) → 그리드
