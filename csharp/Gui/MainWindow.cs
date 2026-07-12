@@ -593,16 +593,21 @@ public class MainWindow : Window
             }
         };
 
-        // ── 엑셀식 Ctrl+휠 = 시트 화면 확대/축소(줌) ──
-        var sheetZoom = new ScaleTransform(1, 1);
-        grid.RenderTransform = sheetZoom;
-        grid.RenderTransformOrigin = RelativePoint.TopLeft;
-        // 터널+handledEventsToo: 확대 후 내부 스크롤뷰가 휠을 삼켜 '축소가 안 되던' 문제 해결
+        // ── 엑셀식 Ctrl+휠 = 시트 확대/축소(콘텐츠 줌: 폰트·열너비·행높이 비율) ──
+        // RenderTransform 방식은 내부 스크롤뷰 좌표와 어긋나 스크롤이 이상했음 → 레이아웃 재계산 방식으로 교체.
+        double zoom = 1.0;
         grid.AddHandler(InputElement.PointerWheelChangedEvent, (object? _, PointerWheelEventArgs e) =>
         {
             if (!e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
-            double s = Math.Clamp(sheetZoom.ScaleX + (e.Delta.Y > 0 ? 0.1 : -0.1), 0.5, 2.5);
-            sheetZoom.ScaleX = s; sheetZoom.ScaleY = s; e.Handled = true;
+            double target = Math.Clamp(zoom * (e.Delta.Y > 0 ? 1.1 : 1 / 1.1), 0.5, 2.5);
+            double f = target / zoom; zoom = target;
+            grid.FontSize = (double.IsNaN(grid.FontSize) ? 12.0 : grid.FontSize) * f;
+            foreach (var col in grid.Columns)
+            {
+                double w = col.Width.IsAbsolute ? col.Width.Value : col.ActualWidth;
+                if (w > 0) col.Width = new DataGridLength(Math.Max(20, w * f));
+            }
+            e.Handled = true;
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
 
         // ── 엑셀식 개별 행 높이 = 그 행의 행번호 라벨 하단 경계 드래그(행마다 따로) ──
@@ -614,7 +619,7 @@ public class MainWindow : Window
         {
             if (rowDragging && dragRow != null)
             {
-                double h = Math.Clamp(dragStartH + (e.GetPosition(grid).Y - dragStartY) / sheetZoom.ScaleY, 18, 400);
+                double h = Math.Clamp(dragStartH + (e.GetPosition(grid).Y - dragStartY), 18, 400);
                 dragRow.Height = h; if (dragVm != null) rowHeights[dragVm] = h;
                 e.Handled = true; return;
             }
