@@ -96,6 +96,16 @@ if (args.Length > 0 && args[0] == "josatest")
     return 0;
 }
 
+// 서브커맨드: plantest <n> <seed> — patterns.plan/instruction 파리티
+if (args.Length > 0 && args[0] == "plantest")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    var plan = Patterns.Plan(int.Parse(args[1]), Patterns.DefaultProfile, new PyRandom(long.Parse(args[2])));
+    foreach (var t in plan)
+        Console.WriteLine($"{t["comp"]}|{t["end"]}|{t["order"]}|{t["conn"]} :: {Patterns.Instruction(t)}");
+    return 0;
+}
+
 // 서브커맨드: gguftest <path> — LooksLikeGguf 파리티
 if (args.Length > 0 && args[0] == "gguftest")
 {
