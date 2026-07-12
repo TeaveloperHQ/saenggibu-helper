@@ -134,8 +134,12 @@ public class MainWindow : Window
         var genBtn = new Button { Content = "체크된 행 채우기", FontWeight = FontWeight.Bold, Padding = new Thickness(14, 6) };
         var status = new TextBlock { Foreground = Brush.Parse("#666"), Text = "행을 체크하고 '체크된 행 채우기'를 누르세요.", VerticalAlignment = VerticalAlignment.Center };
 
-        // 시트(체크박스 + 학번/이름/내용)
-        var classBox = new AutoCompleteBox { Width = 130, Watermark = "학급(예:1반)", FilterMode = AutoCompleteFilterMode.Contains };
+        // 시트(학급 서브탭 + 체크박스 + 학번/이름/내용)
+        var classStrip = new ListBox { SelectionMode = SelectionMode.Single, Background = Brushes.Transparent, MinWidth = 100 };
+        classStrip.ItemsPanel = new FuncTemplate<Panel?>(() => new WrapPanel { Orientation = Orientation.Horizontal });
+        var newClass = new TextBox { Watermark = "새 학급", Width = 88 };
+        var addClass = new Button { Content = "＋ 학급" };
+        string CurClass() => classStrip.SelectedItem as string ?? "";
         var rows = new ObservableCollection<RowVm>();
         var grid = new DataGrid { ItemsSource = rows, AutoGenerateColumns = false, IsReadOnly = false, GridLinesVisibility = DataGridGridLinesVisibility.All };
         grid.Columns.Add(new DataGridCheckBoxColumn { Header = "✓", Binding = new Binding("Checked") { Mode = BindingMode.TwoWay }, Width = new DataGridLength(40) });
@@ -143,11 +147,12 @@ public class MainWindow : Window
         grid.Columns.Add(new DataGridTextColumn { Header = "이름", Binding = new Binding("Name"), Width = new DataGridLength(84) });
         grid.Columns.Add(new DataGridTextColumn { Header = "내용", Binding = new Binding("Content"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
         var sheetMsg = new TextBlock { Foreground = Brush.Parse("#666") };
-        void LoadRows() { rows.Clear(); foreach (var (nu, na, co) in RosterData.ReadRows(_dataDir, Area().Key, classBox.Text ?? "")) rows.Add(new RowVm { Num = nu, Name = na, Content = co }); for (int i = rows.Count; i < 10; i++) rows.Add(new RowVm()); }
-        void ReloadSheet() { var names = RosterData.ClassNames(_dataDir, Area().Key); classBox.ItemsSource = names; if (string.IsNullOrEmpty(classBox.Text)) classBox.Text = names.Count > 0 ? names[0] : "1반"; LoadRows(); }
-        classBox.SelectionChanged += (_, _) => LoadRows();
+        void LoadRows() { rows.Clear(); foreach (var (nu, na, co) in RosterData.ReadRows(_dataDir, Area().Key, CurClass())) rows.Add(new RowVm { Num = nu, Name = na, Content = co }); for (int i = rows.Count; i < 10; i++) rows.Add(new RowVm()); }
+        void ReloadSheet() { var names = RosterData.ClassNames(_dataDir, Area().Key); classStrip.ItemsSource = names; if (classStrip.SelectedIndex < 0 && names.Count > 0) classStrip.SelectedIndex = 0; LoadRows(); }
+        classStrip.SelectionChanged += (_, _) => LoadRows();
+        addClass.Click += (_, _) => { var k = (newClass.Text ?? "").Trim(); if (k.Length == 0) return; RosterData.WriteRows(_dataDir, Area().Key, k, Array.Empty<(string, string, string)>()); newClass.Text = ""; classStrip.ItemsSource = RosterData.ClassNames(_dataDir, Area().Key); classStrip.SelectedItem = k; };
 
-        areaStrip.SelectionChanged += (_, _) => { subject.IsVisible = Area().SubjectField; input.Watermark = Area().InputHint; RefreshLearn(); classBox.Text = ""; ReloadSheet(); };
+        areaStrip.SelectionChanged += (_, _) => { subject.IsVisible = Area().SubjectField; input.Watermark = Area().InputHint; RefreshLearn(); classStrip.SelectedIndex = -1; ReloadSheet(); };
         subject.IsVisible = Area().SubjectField;
         RefreshLearn(); ReloadSheet();
 
@@ -188,10 +193,11 @@ public class MainWindow : Window
         var saveSheet = new Button { Content = "시트 저장(학습)", FontWeight = FontWeight.Bold };
         saveSheet.Click += (_, _) =>
         {
-            string k = (classBox.Text ?? "").Trim(); if (k.Length == 0) { sheetMsg.Text = "학급명 입력"; return; }
+            string k = CurClass(); if (k.Length == 0) k = (newClass.Text ?? "").Trim();
+            if (k.Length == 0) { sheetMsg.Text = "학급을 선택하거나 새 학급을 입력하세요."; return; }
             RosterData.WriteRows(_dataDir, Area().Key, k, rows.Select(r => (r.Num, r.Name, r.Content)));
             int learned = 0; foreach (var r in rows) if (r.Content.Trim().Length > 0) { _store.AddExample(Area().Key, subject.IsVisible ? (subject.Text ?? "").Trim() : "", r.Name, r.Content); learned++; }
-            classBox.ItemsSource = RosterData.ClassNames(_dataDir, Area().Key);
+            classStrip.ItemsSource = RosterData.ClassNames(_dataDir, Area().Key); classStrip.SelectedItem = k;
             sheetMsg.Text = $"'{k}' 저장 · {learned}건 학습 반영."; RefreshLearn();
             if (_learnStatus != null) _learnStatus.Text = $"학습 예시: 총 {_store.Count()}건";
         };
@@ -219,7 +225,8 @@ public class MainWindow : Window
 
         var sheet = new DockPanel();
         sheet.Children.Add(Docked(new TextBlock { Text = "학급 표 (체크된 행에 채워짐 · 우클릭 '버리기' · Ctrl+휠 확대)", FontWeight = FontWeight.Bold, Margin = new Thickness(0, 8, 0, 4) }, Dock.Top));
-        sheet.Children.Add(Docked(HRow(new TextBlock { Text = "학급", VerticalAlignment = VerticalAlignment.Center }, classBox, addRow, saveSheet, importX, exportX, fsBtn), Dock.Top));
+        sheet.Children.Add(Docked(HRow(new TextBlock { Text = "학급", VerticalAlignment = VerticalAlignment.Center }, classStrip, newClass, addClass), Dock.Top));
+        sheet.Children.Add(Docked(HRow(addRow, saveSheet, importX, exportX, fsBtn), Dock.Top));
         sheet.Children.Add(Docked(sheetMsg, Dock.Top));
         sheet.Children.Add(grid);
 
