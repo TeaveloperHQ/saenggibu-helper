@@ -68,7 +68,10 @@ def main() -> int:
     L += emit_list("EvalConnectors", P._EVAL_CONNECTORS); L.append("")
     L += emit_set("SafeConn", P._SAFE_CONN); L.append("")
     L += emit_set("EvalNouns", P._EVAL_NOUNS); L.append("")
-    L += emit_set("EvalNounsSubject", P._EVAL_NOUNS_SUBJECT)
+    L += emit_set("EvalNounsSubject", P._EVAL_NOUNS_SUBJECT); L.append("")
+    L += emit_set("GenericNouns", P._GENERIC_NOUNS); L.append("")
+    L += emit_list("Meta", list(P._META)); L.append("")
+    L += emit_list("DriftWords", list(P._DRIFT_WORDS))
     L.append("}")
     dest = REPO / "csharp" / "Core" / "ParaphraseData.cs"
     dest.write_text("\n".join(L) + "\n", encoding="utf-8")

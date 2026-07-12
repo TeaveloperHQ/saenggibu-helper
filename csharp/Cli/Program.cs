@@ -78,6 +78,24 @@ if (args.Length > 0 && args[0] == "bench")
     return 0;
 }
 
+// 서브커맨드: validtest <model> <original> <candidate> — _valid 파리티
+if (args.Length > 0 && args[0] == "validtest")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    using var kiwi = new KiwiNative(args[1]);
+    var (allk, crit) = Paraphrase.Nouns(args[2], kiwi, Array.Empty<string>());
+    Console.WriteLine(Paraphrase.Valid(args[3], allk, crit, args[2], kiwi, Array.Empty<string>()) ? "True" : "False");
+    return 0;
+}
+// 서브커맨드: josatest <model> <text> — _fix_josa_ro 파리티
+if (args.Length > 0 && args[0] == "josatest")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    using var kiwi = new KiwiNative(args[1]);
+    Console.WriteLine(Paraphrase.FixJosaRo(args[2], kiwi));
+    return 0;
+}
+
 // 서브커맨드: gguftest <path> — LooksLikeGguf 파리티
 if (args.Length > 0 && args[0] == "gguftest")
 {
