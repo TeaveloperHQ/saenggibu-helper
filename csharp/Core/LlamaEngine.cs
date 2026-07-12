@@ -4,7 +4,7 @@ using LLama.Common;
 using LLama.Sampling;
 using Saenggibu;
 
-namespace Cli;
+namespace Saenggibu;
 
 /// <summary>app/engine.py 의 complete 이식 — LLamaSharp로 ChatML 완성. ILlmEngine 구현.</summary>
 public sealed class LlamaEngine : ILlmEngine, IDisposable

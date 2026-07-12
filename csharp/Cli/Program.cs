@@ -101,7 +101,7 @@ if (args.Length > 0 && args[0] == "gen")
 {
     Console.OutputEncoding = Encoding.UTF8;
     using var kiwi = new KiwiNative(args[2]);
-    using var engine = new Cli.LlamaEngine(args[1]);
+    using var engine = new LlamaEngine(args[1]);
     var res = Paraphrase.LlmParaphrase(args[3], int.Parse(args[4]), engine, kiwi,
         Array.Empty<string>(), Array.Empty<string>());
     Console.WriteLine($"[{res.Count}개 변형]");
