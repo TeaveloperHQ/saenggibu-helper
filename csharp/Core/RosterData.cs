@@ -72,6 +72,25 @@ public static class RosterData
         catch { return new(); }
     }
 
+    /// <summary>학급 이름 변경(JSON 키 교체, 순서 유지). 성공 시 true.</summary>
+    public static bool RenameClass(string dir, string area, string oldName, string newName)
+    {
+        newName = (newName ?? "").Trim();
+        if (newName.Length == 0 || oldName == newName) return false;
+        var path = Path.Combine(dir, $"roster_{area}.json");
+        if (!File.Exists(path)) return false;
+        try
+        {
+            if (JsonNode.Parse(File.ReadAllText(path)) is not JsonObject o || o[oldName] is not JsonNode entry) return false;
+            if (o.ContainsKey(newName)) return false;   // 중복 이름 금지
+            var rebuilt = new JsonObject();             // 순서 유지하며 키만 교체
+            foreach (var kv in o) rebuilt[kv.Key == oldName ? newName : kv.Key] = kv.Value!.DeepClone();
+            File.WriteAllText(path, rebuilt.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+            return true;
+        }
+        catch { return false; }
+    }
+
     /// <summary>학급 시트 행 읽기 → (학번, 이름, 내용) 리스트.</summary>
     public static List<(string num, string name, string content)> ReadRows(string dir, string area, string klass)
     {
