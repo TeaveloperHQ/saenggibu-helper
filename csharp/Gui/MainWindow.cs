@@ -162,7 +162,7 @@ public class MainWindow : Window
         mode.Items.Add("내 문장 변형(같은 의미)"); mode.Items.Add("키워드로 새로 생성"); mode.SelectedIndex = 0;
         void SyncMode() { genOpts.IsVisible = mode.SelectedIndex == 1; }
         mode.SelectionChanged += (_, _) => SyncMode(); SyncMode();
-        var genBtn = new Button { Content = "선택한 행 채우기", FontWeight = FontWeight.Bold, Padding = new Thickness(14, 6) };
+        var genBtn = new Button { Content = "선택한 행 채우기", FontWeight = FontWeight.Bold, Padding = new Thickness(16, 6), Background = Brush.Parse("#4f46e5"), Foreground = Brushes.White };
         var status = new TextBlock { Foreground = Brush.Parse("#666"), Text = "행 번호(라벨)를 클릭해 선택하고 '선택한 행 채우기'를 누르세요.", VerticalAlignment = VerticalAlignment.Center };
 
         // 시트(학급 서브탭 + 체크박스 + 학번/이름/내용)
@@ -232,7 +232,7 @@ public class MainWindow : Window
         };
 
         var addRow = new Button { Content = "행 추가" }; addRow.Click += (_, _) => rows.Add(new RowVm());
-        var saveSheet = new Button { Content = "시트 저장(학습)", FontWeight = FontWeight.Bold };
+        var saveSheet = new Button { Content = "저장", FontWeight = FontWeight.Bold, Background = Brush.Parse("#2e7d32"), Foreground = Brushes.White };
         saveSheet.Click += (_, _) =>
         {
             string k = CurClass(); if (k.Length == 0) k = (newClass.Text ?? "").Trim();
@@ -274,13 +274,21 @@ public class MainWindow : Window
         fsBtn.Click += (_, _) => { fs = !fs; topPanel.IsVisible = !fs; fsBtn.Content = fs ? "원래대로" : "전체화면"; };
 
         var hint = new TextBlock { Text = "행 번호 클릭=선택 · Ctrl/Shift=여러 개 · 우클릭=버리기 · Ctrl+휠=확대/축소", Foreground = Brush.Parse("#999"), FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
-        var sheet = new DockPanel();
-        sheet.Children.Add(Docked(Bar(HRow(new TextBlock { Text = "학급", VerticalAlignment = VerticalAlignment.Center }, classStrip, newClass, addClass), fsBtn), Dock.Top));
-        sheet.Children.Add(Docked(Bar(HRow(selectAll, colCombo, hint), HRow(spellBtn, importX, exportX, saveSheet)), Dock.Top));
-        sheet.Children.Add(Docked(sheetMsg, Dock.Top));
-        sheet.Children.Add(grid);
+        Control MRow(double top, Control c) { c.Margin = new Thickness(0, top, 0, 0); return c; }
 
-        var root = new DockPanel { Margin = new Thickness(14) };
+        // 시트 영역(파이썬 순서): 라벨 → 툴바(대상열·힌트 | 맞춤법·엑셀·저장) → 학급 탭(＋ · 전체화면) → 그리드
+        var sheetLabel = new TextBlock { Text = "학급 표 (학급 탭별 · 선택한 행에 채워짐 · 엑셀 가져오기/내보내기)", FontWeight = FontWeight.SemiBold, Foreground = Brush.Parse("#444"), Margin = new Thickness(0, 12, 0, 6) };
+        var toolbar = Bar(HRow(selectAll, new TextBlock { Text = "생성 대상 열", VerticalAlignment = VerticalAlignment.Center }, colCombo, hint), HRow(spellBtn, importX, exportX, saveSheet));
+        var classRow = Bar(HRow(new TextBlock { Text = "학급", VerticalAlignment = VerticalAlignment.Center }, classStrip, newClass, addClass), fsBtn);
+
+        var sheet = new DockPanel();
+        sheet.Children.Add(Docked(sheetLabel, Dock.Top));
+        sheet.Children.Add(Docked(toolbar, Dock.Top));
+        sheet.Children.Add(Docked(MRow(6, classRow), Dock.Top));
+        sheet.Children.Add(Docked(MRow(2, sheetMsg), Dock.Top));
+        sheet.Children.Add(MRow(4, grid));
+
+        var root = new DockPanel { Margin = new Thickness(16, 12, 16, 12) };
         root.Children.Add(Docked(topPanel, Dock.Top));
         root.Children.Add(sheet);
         return root;
