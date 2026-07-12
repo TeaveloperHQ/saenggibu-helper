@@ -65,6 +65,7 @@ public class MainWindow : Window
         _store = new MemoryStore(Path.Combine(_dataDir, "memory.sqlite3"));
         var seed = Environment.GetEnvironmentVariable("SGB_SEED");
         if (seed != null) try { _store.LoadSeedCorpus(seed); } catch { }
+        Autostart.EnsureMemoInstalled();   // 메모 도구 자동시작 등록 + 실행(Windows, exe 동봉 시)
 
         Title = "생기부 도우미";
         Width = 1000; Height = 800;
