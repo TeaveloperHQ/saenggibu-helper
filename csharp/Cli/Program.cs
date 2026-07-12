@@ -119,6 +119,15 @@ if (args.Length > 0 && args[0] == "plantest")
     return 0;
 }
 
+// 서브커맨드: spelltest <text> — 네이버 맞춤법 교정
+if (args.Length > 0 && args[0] == "spelltest")
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    var r = Spellcheck.NaverSpellcheck(args[1]);
+    Console.WriteLine(r == null ? "None" : $"{r.Value.corrected}|{r.Value.errata}");
+    return 0;
+}
+
 // 서브커맨드: gguftest <path> — LooksLikeGguf 파리티
 if (args.Length > 0 && args[0] == "gguftest")
 {
