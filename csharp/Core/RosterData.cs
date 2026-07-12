@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Saenggibu;
 
@@ -60,6 +61,52 @@ public static class RosterData
             outp[klass] = studs.Select(t => t.num.Length > 0 ? $"{t.num} {t.name}".Trim() : t.name).ToList();
         }
         return outp;
+    }
+
+    /// <summary>app/roster_data.py add_memo_to_roster — 메모를 명단에 반영(등록 학급만).
+    /// 학생 있으면 내용 이어붙임('append'), 없으면 행 삽입('insert'). 등록 안 된 학급='no_class'.</summary>
+    public static string AddMemoToRoster(string dir, string area, string klass, string num, string name, string text)
+    {
+        text = (text ?? "").Trim();
+        if (text.Length == 0 || klass.Length == 0 || (num.Length == 0 && name.Length == 0)) return "";
+        var path = Path.Combine(dir, $"roster_{area}.json");
+        JsonObject data;
+        try { data = (JsonNode.Parse(File.Exists(path) ? File.ReadAllText(path) : "{}") as JsonObject) ?? new(); }
+        catch { data = new(); }
+        if (data[klass] is not JsonObject entry) return "no_class";   // 등록 안 된 학급 → 생성 금지
+        if (entry["headers"] is not JsonArray headers) { headers = new JsonArray("내용"); entry["headers"] = headers; }
+        if (entry["rows"] is not JsonArray rows) { rows = new JsonArray(); entry["rows"] = rows; }
+
+        JsonArray? target = null;
+        foreach (var r in rows)
+        {
+            if (r is not JsonArray row) continue;
+            string rnum = row.Count > 0 ? (row[0]?.GetValue<string>() ?? "").Trim() : "";
+            string rname = row.Count > 1 ? (row[1]?.GetValue<string>() ?? "").Trim() : "";
+            if (num.Length > 0 && rnum == num) { target = row; break; }
+            if (num.Length == 0 && name.Length > 0 && rname == name) { target = row; break; }
+        }
+        string result;
+        if (target == null)
+        {
+            var nr = new JsonArray(num, name);
+            for (int i = 0; i < headers.Count; i++) nr.Add("");
+            nr[2] = text;
+            rows.Add(nr); result = "insert";
+        }
+        else
+        {
+            while (target.Count < 3) target.Add("");
+            string cur = (target[2]?.GetValue<string>() ?? "").Trim();
+            target[2] = cur.Length > 0 ? $"{cur}\n{text}" : text; result = "append";
+        }
+        try
+        {
+            File.WriteAllText(path, data.ToJsonString(new JsonSerializerOptions
+            { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        }
+        catch { return ""; }
+        return result;
     }
 
     /// <summary>app/roster_data.py roster_records — 그 영역 등록 학생 레코드.</summary>
