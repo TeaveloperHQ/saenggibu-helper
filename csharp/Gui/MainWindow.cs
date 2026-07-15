@@ -69,6 +69,7 @@ public class MainWindow : Window
 
         Title = "생기부 도우미";
         Width = 1000; Height = 800;
+        FontFamily = new FontFamily(AppFontFamily);   // 한글 sans 강제(궁서체 폴백 방지)
         var ic = Asset("appicon.png"); if (ic != null) Icon = new WindowIcon(ic);
         ApplyStyles();
 
@@ -96,6 +97,23 @@ public class MainWindow : Window
     }
 
     private static Control Docked(Control c, Dock d) { DockPanel.SetDock(c, d); return c; }
+
+    // 앱 기본 글씨체 — 한글이 시스템 serif(궁서체)로 폴백되지 않도록 sans 스택 명시.
+    private const string AppFontFamily = "Malgun Gothic, Noto Sans CJK KR, Inter, sans-serif";
+    // 헤더가 NoWrap로 안 잘리도록 하는 열 최소 너비 — 추정 대신 실제 텍스트 폭을 측정.
+    private static readonly Typeface _hdrFace = new(new FontFamily(AppFontFamily), FontStyle.Normal, FontWeight.SemiBold);
+    private static double HdrMin(string? label)
+    {
+        string s = (label ?? "").Trim();
+        if (s.Length == 0) return 48;
+        try
+        {
+            var ft = new FormattedText(s, System.Globalization.CultureInfo.CurrentCulture,
+                FlowDirection.LeftToRight, _hdrFace, 15.0, Brushes.Black);
+            return Math.Max(52, ft.Width + 30);   // 측정폭 + 패딩·크롬 여유
+        }
+        catch { return Math.Max(52, s.Length * 17 + 30); }
+    }
 
     // 예/아니오 확인 대화상자(모달). true=확인, false=취소.
     private async Task<bool> ConfirmAsync(string title, string message, string okText, string cancelText)
@@ -174,7 +192,7 @@ public class MainWindow : Window
         // 헤더 안 TextBlock: 잘림 방지 + 세로 중앙(테마 기본 clip으로 글자 하단이 잘리던 문제)
         Styles.Add(St(x => x.OfType<DataGridColumnHeader>().Descendant().OfType<TextBlock>(),
             (TextBlock.TextTrimmingProperty, TextTrimming.None), (TextBlock.MarginProperty, new Thickness(0)),
-            (TextBlock.TextWrappingProperty, TextWrapping.Wrap),                         // 긴 머리글 잘림 방지(줄바꿈)
+            (TextBlock.TextWrappingProperty, TextWrapping.NoWrap),                       // 줄바꿈 끔(불러오기 auto-fit이 폭 보장) — 어색한 중간 줄바꿈 방지
             (TextBlock.TextAlignmentProperty, TextAlignment.Center),                     // 전부 가운데 정렬
             (TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center),
             (TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center)));
@@ -260,7 +278,7 @@ public class MainWindow : Window
             ItemsSource = rows, AutoGenerateColumns = false, IsReadOnly = false,
             GridLinesVisibility = DataGridGridLinesVisibility.All,
             HeadersVisibility = DataGridHeadersVisibility.All,   // 열 + 행 머리글(엑셀식)
-            RowHeaderWidth = 34,   // RowHeight·ColumnHeaderHeight 미지정 = 내용 맞춤 자동 높이(머리글 줄바꿈 시 늘어남)
+            RowHeaderWidth = 34, ColumnHeaderHeight = 30,   // 헤더 NoWrap 단일 줄 → 고정 높이(코너 체크박스와 정렬)
             CanUserResizeColumns = true, CanUserSortColumns = false,
             ClipboardCopyMode = DataGridClipboardCopyMode.IncludeHeader,   // Ctrl+C 복사
             SelectionMode = DataGridSelectionMode.Extended,
@@ -276,7 +294,7 @@ public class MainWindow : Window
         // TemplateColumn: DataGridTextColumn이 셀 TextBlock에 넣는 로컬 여백을 우회 → 엑셀식 밀착 여백 완전 통제
         DataGridColumn Col(string header, string bindPath, DataGridLength w, bool wrap = false) => new DataGridTemplateColumn
         {
-            Header = header, Width = w, CanUserResize = true,
+            Header = header, Width = w, CanUserResize = true, MinWidth = HdrMin(header),
             CellTemplate = new FuncDataTemplate<RowVm>((_, _) =>
             {
                 var tb = new TextBlock
@@ -304,7 +322,7 @@ public class MainWindow : Window
         string numLabel = "학번", nameLabel = "이름", contentLabel = "내용";
         grid.Columns.Add(Col(numLabel, "Num", new DataGridLength(68)));
         grid.Columns.Add(Col(nameLabel, "Name", new DataGridLength(90)));
-        grid.Columns.Add(Col(contentLabel, "Content", new DataGridLength(420), wrap: true));   // 고정 폭 → 엑셀식 가로 스크롤(Star는 스크롤 이상)
+        grid.Columns.Add(Col(contentLabel, "Content", new DataGridLength(1, DataGridLengthUnitType.Star), wrap: true));   // 내용 열 = 단일 star(남는 공간 차지, 넘치면 가로 스크롤). 고정 여백 없음.
         var extraCols = new List<(string id, string label)>();
         int extraSeq = 0;
         var sheetMsg = new TextBlock { Foreground = Brush.Parse("#666") };
@@ -359,7 +377,7 @@ public class MainWindow : Window
         void RebuildExtraColumns()   // 첫 content 열(내용) 뒤 추가 content 열 재구성
         {
             while (grid.Columns.Count > CoreCols) grid.Columns.RemoveAt(grid.Columns.Count - 1);
-            foreach (var (id, label) in extraCols) grid.Columns.Add(Col(label, $"[{id}]", new DataGridLength(200), wrap: true));   // 추가 내용 열도 줄바꿈+행높이 autofit
+            foreach (var (id, label) in extraCols) grid.Columns.Add(Col(label, $"[{id}]", new DataGridLength(180), wrap: true));   // 추가 내용 열 고정 자연너비
             RefreshColCombo(false); UpdateHideMarkers();
         }
         void LoadRows()
@@ -378,6 +396,7 @@ public class MainWindow : Window
             }
             for (int i = rows.Count; i < 50; i++) rows.Add(new RowVm());   // 기본 50행(학급 25명+ 여유)
             grid.Columns[0].Header = numLabel; grid.Columns[1].Header = nameLabel; grid.Columns[2].Header = contentLabel;
+            grid.Columns[0].MinWidth = HdrMin(numLabel); grid.Columns[1].MinWidth = HdrMin(nameLabel); grid.Columns[2].MinWidth = HdrMin(contentLabel);
             RebuildExtraColumns();
             RefreshColCombo(true);   // 로드 시 기본 = 내용 가장 많은 열
             // 저장된 보기 상태(열 고정·숨김·너비·행높이) 복원
@@ -389,7 +408,8 @@ public class MainWindow : Window
                 for (int i = 0; i < grid.Columns.Count; i++)
                 {
                     if (view.hidden.Contains(i)) grid.Columns[i].IsVisible = false;
-                    if (i < view.colWidths.Count && view.colWidths[i] > 0) grid.Columns[i].Width = new DataGridLength(view.colWidths[i]);
+                    // 내용 열(2)은 항상 star(남는 공간 채움). 나머지는 저장 폭 적용(헤더 잘림 방지 위해 MinWidth 이상).
+                    if (i != 2 && i < view.colWidths.Count && view.colWidths[i] > 0) grid.Columns[i].Width = new DataGridLength(Math.Max(view.colWidths[i], grid.Columns[i].MinWidth));
                 }
                 grid.FrozenColumnCount = Math.Clamp(view.frozen, 0, Math.Max(0, grid.Columns.Count - 1));
                 foreach (var kv in view.rowHeights) if (kv.Key < rows.Count) rowHeights[rows[kv.Key]] = kv.Value;
@@ -509,27 +529,49 @@ public class MainWindow : Window
 
                 int ncol = Math.Max(hdrs.Count, xrows.Max(r => r.Count));
                 while (hdrs.Count < ncol) hdrs.Add("");
-                bool hasHeader = hdrs.Any(h => h.Length > 0);
-                // 기존 열 레이블 제거 → 엑셀 열 레이블 그대로 이식(헤더 없으면 열1·열2…). 열은 최소 3개.
-                string Lbl(int c) => hasHeader ? (c < hdrs.Count && hdrs[c].Length > 0 ? hdrs[c] : $"열{c + 1}") : (c == 0 ? "학번" : c == 1 ? "이름" : c == 2 ? "내용" : $"내용{c - 1}");
+                bool hasHeader = hdrs.Any(h => h.Trim().Length > 0);
+                // 이름(헤더) 없는 열은 제외. 헤더 자체가 없으면 전체 유지(위치 기반).
+                var keep = hasHeader ? Enumerable.Range(0, ncol).Where(c => hdrs[c].Trim().Length > 0).ToList()
+                                     : Enumerable.Range(0, ncol).ToList();
+                if (keep.Count == 0) keep.Add(0);
+                int ecol = Math.Max(CoreCols, keep.Count);   // 모델상 코어 3열 유지
+                int Kc(int i) => i < keep.Count ? keep[i] : -1;
+                string ELbl(int i)
+                {
+                    int c = Kc(i);
+                    if (c >= 0 && hasHeader && hdrs[c].Trim().Length > 0) return hdrs[c].Trim();
+                    return i == 0 ? "학번" : i == 1 ? "이름" : i == 2 ? "내용" : $"내용{i - 1}";
+                }
                 rows.Clear(); extraCols.Clear();
-                numLabel = Lbl(0); nameLabel = Lbl(1); contentLabel = Lbl(2);
-                for (int c = 3; c < ncol; c++) { extraSeq++; extraCols.Add(("c" + extraSeq, Lbl(c))); }
+                numLabel = ELbl(0); nameLabel = ELbl(1); contentLabel = ELbl(2);
+                for (int i = 3; i < ecol; i++) { extraSeq++; extraCols.Add(("c" + extraSeq, ELbl(i))); }
                 foreach (var xr in xrows)
                 {
-                    string Cell(int c) => c < xr.Count ? xr[c] : "";
+                    string Cell(int i) { int c = Kc(i); return c >= 0 && c < xr.Count ? xr[c] : ""; }
                     var vm = new RowVm { Num = Cell(0), Name = Cell(1), Content = Cell(2) };
-                    for (int c = 3; c < ncol; c++) vm.Extra[extraCols[c - 3].id] = Cell(c);
+                    for (int i = 3; i < ecol; i++) vm.Extra[extraCols[i - 3].id] = Cell(i);
                     rows.Add(vm);
                 }
                 for (int i = rows.Count; i < 50; i++) rows.Add(new RowVm());
-                // 새 시트 → 보기 상태 초기화(고정·숨김·행높이) → 줄바꿈+행높이 autofit 그대로
+                // 새 시트 → 보기 상태 초기화(고정·숨김·행높이)
                 rowHeights.Clear(); grid.FrozenColumnCount = 0;
                 grid.Columns[0].Header = numLabel; grid.Columns[1].Header = nameLabel; grid.Columns[2].Header = contentLabel;
                 foreach (var c in grid.Columns) c.IsVisible = true;
                 RebuildExtraColumns();
+                // 남은 열을 창 너비에 맞춰 비율(star)로 배치 — 자연 너비(헤더·내용)에 비례해 공간 효율 배분
+                for (int i = 0; i < grid.Columns.Count && i < ecol; i++)
+                {
+                    int c = Kc(i);
+                    double headerW = HdrMin(ELbl(i));
+                    double maxChars = 0; if (c >= 0) foreach (var xr in xrows) if (c < xr.Count) maxChars = Math.Max(maxChars, xr[c].Length);
+                    double natural = Math.Clamp(Math.Max(headerW, maxChars * 12 + 24), 64, 480);
+                    grid.Columns[i].MinWidth = headerW;   // 헤더가 안 잘리는 최소 폭
+                    grid.Columns[i].Width = i == 2   // 내용 열은 star(남는 공간 차지), 나머지는 고정 자연너비
+                        ? new DataGridLength(1, DataGridLengthUnitType.Star)
+                        : new DataGridLength(natural);
+                }
                 grid.ItemsSource = null; grid.ItemsSource = rows;
-                sheetMsg.Text = $"엑셀 불러옴 — {xrows.Count}행 · {ncol}열(엑셀 레이블 그대로).";
+                sheetMsg.Text = $"엑셀 불러옴 — {xrows.Count}행 · {keep.Count}열(이름 없는 열 제외).";
             }
             catch (Exception ex) { sheetMsg.Text = "오류:" + ex.Message; }
         };
@@ -586,7 +628,7 @@ public class MainWindow : Window
             string cur = grid.Columns[di].Header as string ?? "";
             ShowPrompt(grid, cur, "열 이름 변경", nn =>
             {
-                grid.Columns[di].Header = nn;
+                grid.Columns[di].Header = nn; grid.Columns[di].MinWidth = HdrMin(nn);
                 if (di == 0) numLabel = nn; else if (di == 1) nameLabel = nn; else if (di == 2) contentLabel = nn;
                 else if (di >= CoreCols) { int ei = di - CoreCols; if (ei >= 0 && ei < extraCols.Count) extraCols[ei] = (extraCols[ei].id, nn); }
                 RefreshColCombo(false);
@@ -856,7 +898,7 @@ public class MainWindow : Window
         };
         var cornerBox = new Border
         {
-            Width = 34, Height = 32, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+            Width = 34, Height = 30, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(1, 1, 0, 0), Background = Brush.Parse("#eef0f3"), Child = cornerCheck,
         };
         ToolTip.SetTip(cornerBox, "학적(학번·이름) 있는 행 전체 선택/해제");
