@@ -9,10 +9,12 @@ public static class Config
     public const string AppName = "생기부 도우미";
     public const string AppVersion = "0.1.0";
 
-    public const string ModelFilename = "qwen2.5-7b-instruct-q4_k_m.gguf";
-    public const string ModelUrl =
-        "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf?download=true";
-    public const long ModelApproxBytes = 4_683_073_344L;
+    // 배포 GGUF = 학교용 파인튜닝(natural-1849-dpo). 우리 Azure Blob(SAS, 읽기전용) 핀 고정.
+    // (SGB_GGUF_URL 로 오버라이드 가능 — 모델 교체 시 URL만 바꾸면 앱이 새로 받음)
+    public const string ModelFilename = "saenggibu-natural-1849-dpo-q4_k_m.gguf";
+    public static readonly string ModelUrl = Environment.GetEnvironmentVariable("SGB_GGUF_URL")
+        ?? "https://sgb50013120.blob.core.windows.net/dist/saenggibu-natural-1849-dpo-q4_k_m.gguf?se=2035-12-31T23%3A59%3A59Z&sp=r&spr=https&sv=2026-04-06&sr=b&sig=bQG6LO1B%2BHFPgLsUh5hw3%2F8ebw7wDzNKiIixFz%2Ftw8I%3D";
+    public const long ModelApproxBytes = 4_683_073_472L;
 
     // Kiwi 형태소 모델(핀 고정 0.23.0) — 우리 Azure Blob(SAS, 읽기전용). exe 옆/데이터 폴더에 없으면 앱이 받아 kiwi_model/ 로 푼다.
     // (SGB_KIWI_MODEL_URL 로 오버라이드 가능 — 배포 시 URL 교체용)
