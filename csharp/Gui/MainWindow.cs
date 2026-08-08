@@ -64,7 +64,8 @@ public class MainWindow : Window
         _glossary = new Glossary(_dataDir);
         _store = new MemoryStore(Path.Combine(_dataDir, "memory.sqlite3"));
         var seed = Environment.GetEnvironmentVariable("SGB_SEED");
-        if (seed != null) try { _store.LoadSeedCorpus(seed); } catch { }
+        if (string.IsNullOrEmpty(seed)) { var b = Path.Combine(AppDir, "seed_corpus.jsonl"); if (File.Exists(b)) seed = b; }   // exe 옆 동봉
+        if (!string.IsNullOrEmpty(seed) && File.Exists(seed)) try { _store.LoadSeedCorpus(seed); } catch { }
         Autostart.EnsureMemoInstalled();   // 메모 도구 자동시작 등록 + 실행(Windows, exe 동봉 시)
 
         Title = "생기부 도우미";
@@ -981,7 +982,8 @@ public class MainWindow : Window
         void LoadModels()
         {
             modelCombo.Items.Clear();
-            if (Directory.Exists(_modelsDir)) foreach (var f in Directory.GetFiles(_modelsDir, "*.gguf")) modelCombo.Items.Add(Path.GetFileName(f));
+            foreach (var dir in new[] { _modelsDir, Path.Combine(AppDir, "models") })   // 다운로드 폴더 + exe 옆 동봉
+                if (Directory.Exists(dir)) foreach (var f in Directory.GetFiles(dir, "*.gguf")) { var n = Path.GetFileName(f); if (!modelCombo.Items.Contains(n)) modelCombo.Items.Add(n); }
             var envG = Environment.GetEnvironmentVariable("SGB_GGUF");
             if (envG != null && File.Exists(envG) && !modelCombo.Items.Contains(Path.GetFileName(envG))) modelCombo.Items.Add(Path.GetFileName(envG));
             var act = _settings.Get<string>("active_model");
@@ -1099,17 +1101,52 @@ public class MainWindow : Window
 
     private static Control Pad(Control c) => new ScrollViewer { Content = new Border { Padding = new Thickness(18), Child = c } };
 
-    private void EnsureKiwi() => _kiwi ??= new KiwiNative(Environment.GetEnvironmentVariable("SGB_KIWI_MODEL") ?? throw new InvalidOperationException("SGB_KIWI_MODEL 필요"));
+    // 배포: exe 옆(ProcessPath 폴더)에서 동봉 파일을 찾는다. single-file 배포에서도 실제 exe 위치.
+    private static string AppDir => Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+
+    // Kiwi 모델: env → 데이터 폴더(다운로드) → exe 옆(동봉). 없으면 데이터 폴더로 받는다.
+    private string KiwiModelPath()
+    {
+        var env = Environment.GetEnvironmentVariable("SGB_KIWI_MODEL");
+        if (!string.IsNullOrEmpty(env) && File.Exists(Path.Combine(env, "cong.mdl"))) return env;
+        var data = Path.Combine(_dataDir, Config.KiwiModelDir);
+        if (File.Exists(Path.Combine(data, "cong.mdl"))) return data;
+        var bundled = Path.Combine(AppDir, Config.KiwiModelDir);
+        if (File.Exists(Path.Combine(bundled, "cong.mdl"))) return bundled;
+        return data;   // 없음 → 여기로 다운로드
+    }
+    private void EnsureKiwi()
+    {
+        if (_kiwi != null) return;
+        var path = KiwiModelPath();
+        if (!File.Exists(Path.Combine(path, "cong.mdl")))   // 없으면 우리 저장소에서 받아 해제(형태소 모델 85MB)
+        {
+            Dispatcher.UIThread.Post(() => { if (_learnStatus != null) _learnStatus.Text = "형태소 모델(85MB) 내려받는 중…"; });
+            Downloader.DownloadZipToDirAsync(Config.KiwiModelUrl, path, "cong.mdl", Config.KiwiModelApproxBytes).GetAwaiter().GetResult();
+            Dispatcher.UIThread.Post(() => { if (_learnStatus != null) _learnStatus.Text = $"학습 예시: 총 {_store.Count()}건"; });
+        }
+        _kiwi = new KiwiNative(path);
+    }
+
+    // GGUF: env → 다운로드 폴더(_modelsDir) → exe 옆 models/ 에서 active_model·기본·아무 gguf 순.
+    private string ResolveGguf()
+    {
+        var env = Environment.GetEnvironmentVariable("SGB_GGUF");
+        if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
+        var act = _settings.Get<string>("active_model");
+        foreach (var dir in new[] { _modelsDir, Path.Combine(AppDir, "models") })
+        {
+            if (!Directory.Exists(dir)) continue;
+            if (act != null) { var p = Path.Combine(dir, act); if (File.Exists(p)) return p; }
+            var def = Path.Combine(dir, Config.ModelFilename); if (File.Exists(def)) return def;
+            var any = Directory.GetFiles(dir, "*.gguf").FirstOrDefault(); if (any != null) return any;
+        }
+        return "";
+    }
     private void EnsureEngines()
     {
         EnsureKiwi();
-        string gguf = Environment.GetEnvironmentVariable("SGB_GGUF") ?? "";
-        if (gguf.Length == 0)
-        {
-            var act = _settings.Get<string>("active_model");
-            var cand = act != null ? Path.Combine(_modelsDir, act) : Path.Combine(_modelsDir, Config.ModelFilename);
-            if (File.Exists(cand)) gguf = cand;
-        }
+        string gguf = ResolveGguf();
         if (gguf.Length == 0) throw new InvalidOperationException("모델 없음 — 학습 모드에서 내려받거나 SGB_GGUF 설정");
         _engine ??= new LlamaEngine(gguf);
     }

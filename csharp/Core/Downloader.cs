@@ -10,6 +10,37 @@ public static class Downloader
 {
     public delegate void ProgressCb(long downloaded, long total);
 
+    /// <summary>zip을 받아 destDir에 해제(Kiwi 모델 등). 이미 marker 파일 있으면 건너뜀.</summary>
+    public static async Task DownloadZipToDirAsync(string url, string destDir, string markerFile,
+        long approxBytes, ProgressCb? progress = null, Func<bool>? shouldCancel = null, HttpClient? client = null)
+    {
+        if (File.Exists(Path.Combine(destDir, markerFile))) return;   // 이미 있음
+        Directory.CreateDirectory(destDir);
+        string tmp = Path.Combine(Path.GetTempPath(), "sgb_" + Path.GetRandomFileName() + ".zip");
+        var http = client ?? new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
+        try
+        {
+            using (var resp = await http.SendAsync(new HttpRequestMessage(HttpMethod.Get, url), HttpCompletionOption.ResponseHeadersRead))
+            {
+                resp.EnsureSuccessStatusCode();
+                long total = resp.Content.Headers.ContentLength ?? approxBytes;
+                long done = 0;
+                await using var src = await resp.Content.ReadAsStreamAsync();
+                await using var f = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None);
+                var buf = new byte[256 * 1024];
+                int read;
+                while ((read = await src.ReadAsync(buf)) > 0)
+                {
+                    if (shouldCancel?.Invoke() == true) throw new OperationCanceledException();
+                    await f.WriteAsync(buf.AsMemory(0, read));
+                    done += read; progress?.Invoke(done, total);
+                }
+            }
+            System.IO.Compression.ZipFile.ExtractToDirectory(tmp, destDir, overwriteFiles: true);
+        }
+        finally { try { File.Delete(tmp); } catch { } }
+    }
+
     public static bool ModelExists(string? path) =>
         path != null && File.Exists(path) && new FileInfo(path).Length > 1_000_000;
 

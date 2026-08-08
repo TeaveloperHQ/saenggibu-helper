@@ -11,6 +11,20 @@ public sealed class KiwiNative : IKiwi, IDisposable
 {
     private const string Lib = "kiwi";
 
+    // 배포(exe 옆 kiwi.dll) + 개발(LD_LIBRARY_PATH) 모두 지원 — 네이티브 lib을 exe 폴더에서 우선 로드.
+    static KiwiNative() => NativeLibrary.SetDllImportResolver(typeof(KiwiNative).Assembly, ResolveNative);
+    private static IntPtr ResolveNative(string name, System.Reflection.Assembly asm, DllImportSearchPath? path)
+    {
+        if (name != Lib) return IntPtr.Zero;
+        var dir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        foreach (var f in new[] { "kiwi.dll", "libkiwi.so", "libkiwi.dylib", "libkiwi.so.0" })
+        {
+            var p = Path.Combine(dir, f);
+            if (File.Exists(p) && NativeLibrary.TryLoad(p, out var h)) return h;
+        }
+        return IntPtr.Zero;   // 폴백: 기본 검색(PATH/LD_LIBRARY_PATH)
+    }
+
     // kiwipiepy 기본값과 정렬: init = BUILD_DEFAULT(15) | MODEL_TYPE_CONG(0x400) = 1039
     private const int InitOptions = 15 | 0x0400;
     // analyze match = Match.ALL(63) | Z_CODA(1<<23); normalize_coda=False

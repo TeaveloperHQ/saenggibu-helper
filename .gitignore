@@ -49,3 +49,8 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Kiwi 네이티브(빌드 시 받음, 미커밋)
+csharp/native/
+*.so
+*.so.*
