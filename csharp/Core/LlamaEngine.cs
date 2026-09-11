@@ -37,7 +37,15 @@ public sealed class LlamaEngine : ILlmEngine, IDisposable
         return Run(sb.ToString(), maxTokens, temperature);
     }
 
+    // 생성과 학습 판별이 동시에 돌 수 있음 → 추론은 한 번에 하나(호출마다 컨텍스트를 새로 잡아 메모리 경쟁 방지)
+    private static readonly object _runLock = new();
+
     private string Run(string prompt, int maxTokens, double temperature)
+    {
+        lock (_runLock) return RunLocked(prompt, maxTokens, temperature);
+    }
+
+    private string RunLocked(string prompt, int maxTokens, double temperature)
     {
         var ex = new StatelessExecutor(_weights, _mp);
         var ip = new InferenceParams

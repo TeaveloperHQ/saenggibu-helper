@@ -205,12 +205,13 @@ public static class RosterData
     }
 
     /// <summary>시트 보기 상태(열 고정·숨김·너비·행높이) 읽기. 없으면 기본값.</summary>
-    public static (int frozen, HashSet<int> hidden, List<double> colWidths, Dictionary<int, double> rowHeights)
+    public static (int frozen, HashSet<int> hidden, List<double> colWidths, Dictionary<int, double> rowHeights, bool contentFill)
         ReadSheetView(string dir, string area, string klass)
     {
         int frozen = 0; var hidden = new HashSet<int>(); var widths = new List<double>(); var rowH = new Dictionary<int, double>();
+        bool fill = true;   // 내용 열 남는 폭 채우기(기본). 사용자가 직접 조절하면 false
         var path = Path.Combine(dir, $"roster_{area}.json");
-        if (!File.Exists(path)) return (frozen, hidden, widths, rowH);
+        if (!File.Exists(path)) return (frozen, hidden, widths, rowH, fill);
         try
         {
             if (JsonNode.Parse(File.ReadAllText(path)) is JsonObject o && o[klass] is JsonObject e && e["view"] is JsonObject v)
@@ -219,15 +220,16 @@ public static class RosterData
                 if (v["hidden"] is JsonArray ha) foreach (var n in ha) if (n != null) hidden.Add(n.GetValue<int>());
                 if (v["colw"] is JsonArray wa) foreach (var n in wa) widths.Add(n?.GetValue<double>() ?? 0);
                 if (v["rowh"] is JsonObject ro) foreach (var kv in ro) if (int.TryParse(kv.Key, out var ri) && kv.Value != null) rowH[ri] = kv.Value.GetValue<double>();
+                if (v["cfill"] is JsonNode fl) fill = fl.GetValue<bool>();   // 'fill'(초기 오판 저장값)은 무시
             }
         }
         catch { }
-        return (frozen, hidden, widths, rowH);
+        return (frozen, hidden, widths, rowH, fill);
     }
 
     /// <summary>시트 보기 상태 저장(기존 학급 항목의 'view' 키만 갱신). 학급 항목이 없으면 무시.</summary>
     public static void WriteSheetView(string dir, string area, string klass, int frozen,
-        IEnumerable<int> hidden, IEnumerable<double> colWidths, IReadOnlyDictionary<int, double> rowHeights)
+        IEnumerable<int> hidden, IEnumerable<double> colWidths, IReadOnlyDictionary<int, double> rowHeights, bool contentFill = true)
     {
         var path = Path.Combine(dir, $"roster_{area}.json");
         if (!File.Exists(path)) return;
@@ -239,6 +241,7 @@ public static class RosterData
         var ha = new JsonArray(); foreach (var i in hidden) ha.Add(i); view["hidden"] = ha;
         var wa = new JsonArray(); foreach (var w in colWidths) wa.Add(w); view["colw"] = wa;
         var ro = new JsonObject(); foreach (var kv in rowHeights) ro[kv.Key.ToString()] = kv.Value; view["rowh"] = ro;
+        view["cfill"] = contentFill;
         entry["view"] = view;
         File.WriteAllText(path, data.ToJsonString(new JsonSerializerOptions
         { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));

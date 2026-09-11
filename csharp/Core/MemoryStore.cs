@@ -76,6 +76,84 @@ public sealed class MemoryStore : IDisposable
         return outp;
     }
 
+    /// <summary>시트 저장 시 학습 — 같은 영역에 이미 있는 문장(학습·버림 모두)은 건너뜀. 새로 넣었으면 true.</summary>
+    public bool AddExampleIfNew(string area, string subject, string keywords, string outputText)
+    {
+        var t = (outputText ?? "").Trim();
+        if (t.Length == 0 || HasExample(area, t)) return false;
+        AddExample(area, subject, keywords, t);
+        return true;
+    }
+
+    /// <summary>같은 영역에 이 문장이 이미 있는지(학습·버림 모두).</summary>
+    public bool HasExample(string area, string outputText)
+    {
+        using var dup = _conn.CreateCommand();
+        dup.CommandText = "SELECT 1 FROM examples WHERE area=$a AND output_text=$o LIMIT 1";
+        dup.Parameters.AddWithValue("$a", area); dup.Parameters.AddWithValue("$o", (outputText ?? "").Trim());
+        return dup.ExecuteScalar() != null;
+    }
+
+    /// <summary>1회 정리(v1) — 예전 시트 저장 버그로 쌓인 학습 예시 정리: 문장이 아닌 것(숫자·학기 등)·중복 삭제,
+    /// 학생 이름이던 키워드(짧은 단일 낱말) 비움. 실행 전 backupPath로 DB 백업. 삭제 건수 반환(이미 정리했으면 -1).</summary>
+    public int CleanupLearnedV1(string backupPath)
+    {
+        using (var chk = _conn.CreateCommand())
+        {
+            chk.CommandText = "SELECT v FROM meta WHERE k='cleanup_v1'";
+            if (chk.ExecuteScalar() != null) return -1;
+        }
+        Backup(backupPath);
+        var bad = new List<long>(); var nameKw = new List<long>();
+        using (var q = _conn.CreateCommand())
+        {
+            q.CommandText = "SELECT id, output_text, keywords FROM examples WHERE rating>0";
+            using var r = q.ExecuteReader();
+            while (r.Read())
+            {
+                if (!LearnFilter.LooksLikeSentence(r.GetString(1))) { bad.Add(r.GetInt64(0)); continue; }
+                var kw = r.GetString(2).Trim();
+                if (kw.Length > 0 && kw.Length <= 5 && !kw.Contains(' ') && !kw.Contains(',')) nameKw.Add(r.GetInt64(0));
+            }
+        }
+        int removed = 0;
+        if (bad.Count > 0) removed += Exec($"DELETE FROM examples WHERE id IN ({string.Join(",", bad)})");
+        removed += Exec("DELETE FROM examples WHERE rating>0 AND id NOT IN (SELECT MIN(id) FROM examples WHERE rating>0 GROUP BY area, output_text)");
+        if (nameKw.Count > 0) Exec($"UPDATE examples SET keywords='' WHERE id IN ({string.Join(",", nameKw)})");
+        Exec("INSERT INTO meta(k,v) VALUES('cleanup_v1', datetime('now')) ON CONFLICT(k) DO UPDATE SET v=excluded.v");
+        return removed;
+    }
+
+    private int Exec(string sql) { using var c = _conn.CreateCommand(); c.CommandText = sql; return c.ExecuteNonQuery(); }
+
+    /// <summary>키워드가 빈 학습 예시(id, 문장) — 명사 키워드 채우기용.</summary>
+    public List<(long id, string text)> ExamplesMissingKeywords()
+    {
+        var outp = new List<(long, string)>();
+        using var q = _conn.CreateCommand();
+        q.CommandText = "SELECT id, output_text FROM examples WHERE rating>0 AND keywords=''";
+        using var r = q.ExecuteReader();
+        while (r.Read()) outp.Add((r.GetInt64(0), r.GetString(1)));
+        return outp;
+    }
+
+    public void SetKeywords(long id, string keywords)
+    {
+        using var c = _conn.CreateCommand();
+        c.CommandText = "UPDATE examples SET keywords=$k WHERE id=$i";
+        c.Parameters.AddWithValue("$k", keywords); c.Parameters.AddWithValue("$i", id);
+        c.ExecuteNonQuery();
+    }
+
+    /// <summary>화면 표시용 학습 예시 수 — 채택(rating&gt;0)된 서로 다른 문장만(버린 표현·중복 제외).</summary>
+    public int CountLearned(string? area = null)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(DISTINCT output_text) FROM examples WHERE rating>0" + (area == null ? "" : " AND area=$a");
+        if (area != null) cmd.Parameters.AddWithValue("$a", area);
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
     public int Count(string? area = null)
     {
         using var cmd = _conn.CreateCommand();
