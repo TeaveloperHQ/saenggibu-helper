@@ -191,12 +191,15 @@ public static class RosterData
         }
         var ext = new JsonArray();
         foreach (var (id, label) in extra) ext.Add(new JsonObject { ["id"] = id, ["label"] = label });
-        data[klass] = new JsonObject
+        var keepView = (data[klass] as JsonObject)?["view"]?.DeepClone();   // 보기 상태(열 너비·행 높이 등) 보존
+        var entry = new JsonObject
         {
             ["headers"] = new JsonArray(string.IsNullOrEmpty(contentLabel) ? "내용" : contentLabel),
             ["corehdr"] = new JsonArray(string.IsNullOrEmpty(numLabel) ? "학번" : numLabel, string.IsNullOrEmpty(nameLabel) ? "이름" : nameLabel),
             ["ext"] = ext, ["rows"] = arr,
         };
+        if (keepView != null) entry["view"] = keepView;
+        data[klass] = entry;
         File.WriteAllText(path, data.ToJsonString(new JsonSerializerOptions
         { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
     }
