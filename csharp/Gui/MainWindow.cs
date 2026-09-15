@@ -330,6 +330,7 @@ public class MainWindow : Window
         classStrip.ItemsPanel = new FuncTemplate<Panel?>(() => new WrapPanel { Orientation = Orientation.Horizontal });
         string CurClass() => classStrip.SelectedItem as string ?? "";
         bool suppress = false;
+        string loadedClass = "";   // 지금 표에 떠 있는 학급 — ＋ 탭을 누른 뒤 강조를 이 탭으로 되돌림
         var rows = new ObservableCollection<RowVm>();
         var grid = new DataGrid
         {
@@ -540,6 +541,7 @@ public class MainWindow : Window
             undo.Clear(); redo.Clear();   // 다른 시트로 전환 → 되돌리기 기록 초기화
             ShowTabMsg();                 // 메시지도 이 탭 것으로
             contentFill = true;           // 기본 = 내용 열 채우기(저장된 보기가 있으면 아래에서 덮어씀) — 이전 시트 설정이 남지 않게
+            loadedClass = CurClass() is { Length: > 0 } lc && lc != "＋" ? lc : "";
             if (CurClass() is { Length: > 0 } cc && cc != "＋")
             {
                 var (nlbl, mlbl, clbl, ext, rr) = RosterData.ReadRowsExtended(_dataDir, Area().Key, cc);
@@ -603,7 +605,11 @@ public class MainWindow : Window
             if (CurClass() == "＋")   // ＋ 탭 = 새 학급 추가(엑셀식)
             {
                 ShowPrompt(classStrip, "", "새 학급 이름", name => { RosterData.WriteRows(_dataDir, Area().Key, name, Array.Empty<(string, string, string)>()); ReloadSheet(); classStrip.SelectedItem = name; });
-                suppress = true; classStrip.SelectedIndex = 0; suppress = false;
+                // 이름 입력 중·취소 시 강조는 지금 보고 있는 학급 탭으로(예전: 무조건 첫 탭으로 옮겨져 보이는 표와 강조가 어긋났음)
+                suppress = true;
+                if (loadedClass.Length > 0 && classStrip.Items.Cast<object>().Contains(loadedClass)) classStrip.SelectedItem = loadedClass;
+                else classStrip.SelectedIndex = -1;
+                suppress = false;
             }
             else LoadRows();
         };

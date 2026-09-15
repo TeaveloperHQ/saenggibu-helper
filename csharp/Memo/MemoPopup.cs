@@ -1,9 +1,11 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Saenggibu;
 using System;
 using System.Collections.Generic;
@@ -77,10 +79,23 @@ public class MemoPopup : Window
         };
     }
 
-    private static AutoCompleteBox MkBox(string ph, double w) => new()
+    private static AutoCompleteBox MkBox(string ph, double w)
     {
-        Width = w, Watermark = ph, MinimumPrefixLength = 0, FilterMode = AutoCompleteFilterMode.Contains, MinHeight = 0,
-    };
+        var b = new AutoCompleteBox { Width = w, Watermark = ph, MinimumPrefixLength = 0, FilterMode = AutoCompleteFilterMode.Custom, MinHeight = 0 };
+        // 칸에 이미 완성된 값(예: 번호 3)이 있으면 전체 후보를 보여 다른 학생을 고를 수 있게, 입력 중인 부분 값이면 포함 검색
+        b.ItemFilter = (search, item) =>
+            string.IsNullOrEmpty(search) || (b.ItemsSource as List<string>)?.Contains(search) == true
+            || (item?.ToString() ?? "").Contains(search, StringComparison.Ordinal);
+        // 칸을 클릭·탭 이동만 해도 후보 목록을 펼친다(기본은 글자를 쳐야만 열려서 학생이 안 불러와진 것처럼 보였음).
+        // 목록에서 항목을 고른 직후 포커스가 돌아올 때 다시 열리지 않게 닫힌 직후는 건너뜀.
+        var closedAt = DateTime.MinValue;
+        b.DropDownClosed += (_, _) => closedAt = DateTime.UtcNow;
+        void Open() { if (b.IsKeyboardFocusWithin && !b.IsDropDownOpen && DateTime.UtcNow - closedAt > TimeSpan.FromMilliseconds(300)) b.IsDropDownOpen = true; }
+        b.GotFocus += (_, _) => Dispatcher.UIThread.Post(Open);
+        b.AddHandler(InputElement.PointerReleasedEvent, (_, e) => { if (e.Source is Visual v && b.IsVisualAncestorOf(v)) Dispatcher.UIThread.Post(Open); },
+            RoutingStrategies.Bubble, handledEventsToo: true);
+        return b;
+    }
 
     // ── 표시 ──
     public void PopupBar()
@@ -135,31 +150,53 @@ public class MemoPopup : Window
             : vals.OrderBy(s => s, StringComparer.Ordinal).ToList();
     }
 
-    private void RefreshOptions(AutoCompleteBox? source)
+    private static void SetItems(AutoCompleteBox box, List<string> opts)
     {
-        var boxes = new (AutoCompleteBox box, string field)[] { (_class, "klass"), (_num, "num"), (_name, "name") };
-        string Val(string f) => (f == "klass" ? _class.Text : f == "num" ? _num.Text : _name.Text ?? "").Trim();
-        var known = boxes.ToDictionary(b => b.field, b => Val(b.field).Length > 0 && _records.Any(r => Get(r, b.field) == Val(b.field)));
-        foreach (var (box, field) in boxes)
-        {
-            var others = boxes.Where(o => o.field != field && known[o.field]).Select(o => o.field).ToList();
-            var cand = _records.Where(r => others.All(g => Get(r, g) == Val(g)));
-            var opts = Distinct(field, cand);
-            box.ItemsSource = opts;
-            if (box == source) continue;
-            string cur = (box.Text ?? "").Trim();
-            if (opts.Count == 1) { box.Text = opts[0]; }
-            else if (cur.Length > 0 && !opts.Contains(cur)) box.Text = "";
-        }
+        if (box.ItemsSource is List<string> cur && cur.SequenceEqual(opts)) return;   // 같은 목록이면 그대로(타이핑 중 드롭다운 재설정 방지)
+        box.ItemsSource = opts;
     }
 
-    private static string Get((string klass, string num, string name) r, string f) => f == "klass" ? r.klass : f == "num" ? r.num : r.name;
+    /// <summary>후보: 학급=전체, 번호·이름=고른 학급 안(학급 미확정이면 전체). 칸끼리 서로 좁히지 않고, 하나가 정해지면 나머지를 채운다.
+    /// (예전: 세 칸이 서로를 필터 → 학생 한 명이 채워지면 번호·이름 목록이 그 한 명으로 줄어 다른 학생을 못 골랐음)</summary>
+    private void RefreshOptions(AutoCompleteBox? source)
+    {
+        static string V(AutoCompleteBox b) => (b.Text ?? "").Trim();
+        List<(string klass, string num, string name)> Pool()
+        {
+            var inClass = _records.Where(r => r.klass == V(_class)).ToList();
+            return inClass.Count > 0 ? inClass : _records;
+        }
+        bool classOk = _records.Any(r => r.klass == V(_class));
+        var pool = Pool();
+        (string klass, string num, string name)? Only(Func<(string klass, string num, string name), bool> pred)
+        {
+            var m = pool.Where(pred).Take(2).ToList();
+            return m.Count == 1 ? m[0] : null;
+        }
+        string num = V(_num), name = V(_name);
+
+        if (source == _num && num.Length > 0 && Only(r => r.num == num) is { } byNum)
+        { _name.Text = byNum.name; if (!classOk) _class.Text = byNum.klass; }
+        else if (source == _name && name.Length > 0 && Only(r => r.name == name) is { } byName)
+        { _num.Text = byName.num; if (!classOk) _class.Text = byName.klass; }
+        else if (source == _class && classOk)   // 학급을 바꾸면 그 반의 같은 번호(없으면 같은 이름) 학생으로, 둘 다 없으면 비움
+        {
+            if (num.Length > 0 && Only(r => r.num == num) is { } c1) _name.Text = c1.name;
+            else if (name.Length > 0 && Only(r => r.name == name) is { } c2) _num.Text = c2.num;
+            else { _num.Text = ""; _name.Text = ""; }
+        }
+
+        pool = Pool();   // 위에서 학급이 채워졌을 수 있음
+        SetItems(_class, Distinct("klass", _records));
+        SetItems(_num, Distinct("num", pool));
+        SetItems(_name, Distinct("name", pool));
+    }
 
     private void SyncFrom(AutoCompleteBox source)
     {
         if (_syncing) return;
         _syncing = true;
-        try { RefreshOptions(source); RefreshOptions(source); }   // 유일값 연쇄 확정(2회 수렴)
+        try { RefreshOptions(source); }
         finally { _syncing = false; }
     }
 

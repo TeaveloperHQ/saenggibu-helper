@@ -50,9 +50,16 @@ public class App : Application
             if (desktop.Args?.Contains("--popup") == true)   // '지금 메모 열기'로 실행 시 즉시 팝업
                 Dispatcher.UIThread.Post(Show);
 
-            // 메모 도구가 직접 실행되면 자기 자신을 자동시작 등록(상주 지속)
+            // 메모 도구가 직접 실행되면 자기 자신을 자동시작 등록(상주 지속).
+            // 개발 실행(dotnet Memo.dll)이면 ProcessPath가 dotnet.exe라 등록하지 않는다. 항상 덮어써서 예전에 잘못 등록된 경로도 바로잡는다.
             if (Saenggibu.Autostart.IsSupported && OperatingSystem.IsWindows())
-                try { var exe = Environment.ProcessPath; if (exe != null && !Saenggibu.Autostart.IsRegistered()) Saenggibu.Autostart.Register(exe); } catch { }
+                try
+                {
+                    var exe = Environment.ProcessPath;
+                    if (exe != null && !System.IO.Path.GetFileNameWithoutExtension(exe).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+                        Saenggibu.Autostart.Register(exe);
+                }
+                catch { }
         }
         base.OnFrameworkInitializationCompleted();
     }

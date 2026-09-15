@@ -14,11 +14,60 @@ public static class RosterData
                 ? Directory.GetFiles(dir, "roster_*.json").OrderBy(f => f, StringComparer.Ordinal)
                 : Enumerable.Empty<string>();
 
-    private static (string num, string name) RowKey(JsonElement row)
+    private static readonly string[] ContentKeys = { "특기사항", "세부능력", "행동특성", "종합의견", "내용", "기재", "특기", "의견" };
+
+    private static string Str(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : n?.ToString() ?? "";
+
+    /// <summary>학급 항목의 열 라벨(행 값 순서와 같음: corehdr 2개 → headers[0] → ext 라벨).</summary>
+    private static List<string> Labels(JsonObject entry)
     {
-        string num = row.GetArrayLength() > 0 ? (row[0].GetString() ?? "").Trim() : "";
-        string name = row.GetArrayLength() > 1 ? (row[1].GetString() ?? "").Trim() : "";
-        return (num, name);
+        var ch = entry["corehdr"] as JsonArray;
+        var hs = entry["headers"] as JsonArray;
+        string Or(string s, string d) => s.Length > 0 ? s : d;
+        var labels = new List<string>
+        {
+            Or(Str(ch?.ElementAtOrDefault(0)), "학번"), Or(Str(ch?.ElementAtOrDefault(1)), "이름"), Or(Str(hs?.ElementAtOrDefault(0)), "내용"),
+        };
+        if (entry["ext"] is JsonArray ea) foreach (var it in ea) labels.Add(Str((it as JsonObject)?["label"]));
+        else if (hs != null) labels.AddRange(hs.Skip(1).Select(Str));   // 옛 형식: headers = 내용 열들
+        return labels;
+    }
+
+    /// <summary>번호·이름·내용 열 위치. 엑셀에서 가져온 시트는 열 순서가 제각각이라
+    /// (예: 학년도|학기|학년|반/번호|학생개인번호|성명|과목명|세부능력…) 1·2·3열 고정 대신 라벨로 찾는다.</summary>
+    private static (int num, int name, int content) KeyCols(List<string> labels)
+    {
+        int Find(Func<string, bool> pred, params int[] skip)
+        {
+            for (int i = 0; i < labels.Count; i++) if (!skip.Contains(i) && pred(labels[i])) return i;
+            return -1;
+        }
+        int name = Find(l => l.Contains("이름") || l.Contains("성명"));
+        int num = Find(l => l is "번호" or "학번", name);
+        if (num < 0) num = Find(l => l.Contains("번호") && !l.Contains("개인"), name);   // '반/번호' O, '학생개인번호' X
+        if (num < 0) num = Find(l => l.Contains("학번"), name);
+        if (num < 0) num = name == 0 ? 1 : 0;
+        if (name < 0) name = num == 1 ? 0 : 1;
+        int content = Find(l => ContentKeys.Any(k => l.Contains(k)), num, name);
+        if (content < 0) content = Enumerable.Range(2, labels.Count + 2).First(i => i != num && i != name);
+        return (num, name, content);
+    }
+
+    /// <summary>'반/번호' 값(예: 1/3) → 번호만.</summary>
+    private static string NumVal(string v) { v = v.Trim(); int s = v.LastIndexOf('/'); return s >= 0 ? v[(s + 1)..].Trim() : v; }
+
+    private static (string num, string name) RowKey(JsonArray row, (int num, int name, int content) cols) =>
+        (NumVal(Str(row.ElementAtOrDefault(cols.num))), Str(row.ElementAtOrDefault(cols.name)).Trim());
+
+    /// <summary>로스터 파일의 (학급, 항목) 목록. 읽기 실패·형식 불일치는 건너뜀.</summary>
+    private static IEnumerable<(string klass, JsonObject entry, JsonArray rows)> Sheets(string path)
+    {
+        JsonObject? o;
+        try { o = JsonNode.Parse(File.ReadAllText(path)) as JsonObject; }
+        catch { yield break; }
+        if (o == null) yield break;
+        foreach (var kv in o)
+            if (kv.Value is JsonObject e && e["rows"] is JsonArray rows) yield return (kv.Key, e, rows);
     }
 
     /// <summary>app/roster_data.py classes_and_students — {학급: [표시명]}. area=null이면 전 영역 병합.</summary>
@@ -28,30 +77,19 @@ public static class RosterData
         var merged = new Dictionary<string, List<(string num, string name)>>();
         var seenPer = new Dictionary<string, HashSet<(string, string)>>();
         foreach (var f in RosterFiles(dir, area))
-        {
-            JsonDocument doc;
-            try { doc = JsonDocument.Parse(File.ReadAllText(f)); }
-            catch { continue; }
-            using (doc)
+            foreach (var (klass, entry, rows) in Sheets(f))
             {
-                if (doc.RootElement.ValueKind != JsonValueKind.Object) continue;
-                foreach (var kv in doc.RootElement.EnumerateObject())
+                if (!merged.TryGetValue(klass, out var bag))
+                { bag = new(); merged[klass] = bag; seenPer[klass] = new(); }
+                var cols = KeyCols(Labels(entry));
+                foreach (var r in rows)
                 {
-                    if (kv.Value.ValueKind != JsonValueKind.Object
-                        || !kv.Value.TryGetProperty("rows", out var rows)
-                        || rows.ValueKind != JsonValueKind.Array) continue;
-                    if (!merged.TryGetValue(kv.Name, out var bag))
-                    { bag = new(); merged[kv.Name] = bag; seenPer[kv.Name] = new(); }
-                    foreach (var row in rows.EnumerateArray())
-                    {
-                        if (row.ValueKind != JsonValueKind.Array) continue;
-                        var (num, name) = RowKey(row);
-                        if ((num.Length > 0 || name.Length > 0) && seenPer[kv.Name].Add((num, name)))
-                            bag.Add((num, name));
-                    }
+                    if (r is not JsonArray row) continue;
+                    var (num, name) = RowKey(row, cols);
+                    if ((num.Length > 0 || name.Length > 0) && seenPer[klass].Add((num, name)))
+                        bag.Add((num, name));
                 }
             }
-        }
         var outp = new Dictionary<string, List<string>>();
         foreach (var klass in merged.Keys.OrderBy(k => k, StringComparer.Ordinal))
         {
@@ -258,31 +296,31 @@ public static class RosterData
         try { data = (JsonNode.Parse(File.Exists(path) ? File.ReadAllText(path) : "{}") as JsonObject) ?? new(); }
         catch { data = new(); }
         if (data[klass] is not JsonObject entry) return "no_class";   // 등록 안 된 학급 → 생성 금지
-        if (entry["headers"] is not JsonArray headers) { headers = new JsonArray("내용"); entry["headers"] = headers; }
         if (entry["rows"] is not JsonArray rows) { rows = new JsonArray(); entry["rows"] = rows; }
+        var labels = Labels(entry);
+        var cols = KeyCols(labels);
 
         JsonArray? target = null;
         foreach (var r in rows)
         {
             if (r is not JsonArray row) continue;
-            string rnum = row.Count > 0 ? (row[0]?.GetValue<string>() ?? "").Trim() : "";
-            string rname = row.Count > 1 ? (row[1]?.GetValue<string>() ?? "").Trim() : "";
+            var (rnum, rname) = RowKey(row, cols);
             if (num.Length > 0 && rnum == num) { target = row; break; }
             if (num.Length == 0 && name.Length > 0 && rname == name) { target = row; break; }
         }
         string result;
         if (target == null)
         {
-            var nr = new JsonArray(num, name);
-            for (int i = 0; i < headers.Count; i++) nr.Add("");
-            nr[2] = text;
+            var nr = new JsonArray();
+            for (int i = 0, n = Math.Max(labels.Count, Math.Max(cols.num, Math.Max(cols.name, cols.content)) + 1); i < n; i++) nr.Add("");
+            nr[cols.num] = num; nr[cols.name] = name; nr[cols.content] = text;
             rows.Add(nr); result = "insert";
         }
         else
         {
-            while (target.Count < 3) target.Add("");
-            string cur = (target[2]?.GetValue<string>() ?? "").Trim();
-            target[2] = cur.Length > 0 ? $"{cur}\n{text}" : text; result = "append";
+            while (target.Count <= cols.content) target.Add("");
+            string cur = Str(target[cols.content]).Trim();
+            target[cols.content] = cur.Length > 0 ? $"{cur}\n{text}" : text; result = "append";
         }
         try
         {
@@ -296,32 +334,22 @@ public static class RosterData
     /// <summary>app/roster_data.py roster_records — 그 영역 등록 학생 레코드.</summary>
     public static List<(string klass, string num, string name)> RosterRecords(string dir, string area)
     {
-        var path = Path.Combine(dir, $"roster_{area}.json");
-        if (!File.Exists(path)) return new();
-        JsonDocument doc;
-        try { doc = JsonDocument.Parse(File.ReadAllText(path)); }
-        catch { return new(); }
-        using (doc)
-        {
-            if (doc.RootElement.ValueKind != JsonValueKind.Object) return new();
-            var outp = new List<(string, string, string)>();
-            var seen = new HashSet<(string, string, string)>();
-            foreach (var kv in doc.RootElement.EnumerateObject())
+        var outp = new List<(string, string, string)>();
+        var seen = new HashSet<(string, string, string)>();
+        foreach (var f in RosterFiles(dir, area))
+            foreach (var (klass, entry, rows) in Sheets(f))
             {
-                if (kv.Value.ValueKind != JsonValueKind.Object
-                    || !kv.Value.TryGetProperty("rows", out var rows)
-                    || rows.ValueKind != JsonValueKind.Array) continue;
-                foreach (var row in rows.EnumerateArray())
+                var cols = KeyCols(Labels(entry));
+                foreach (var r in rows)
                 {
-                    if (row.ValueKind != JsonValueKind.Array) continue;
-                    var (num, name) = RowKey(row);
+                    if (r is not JsonArray row) continue;
+                    var (num, name) = RowKey(row, cols);
                     if (num.Length == 0 && name.Length == 0) continue;
-                    var key = (kv.Name, num, name);
+                    var key = (klass, num, name);
                     if (seen.Add(key)) outp.Add(key);
                 }
             }
-            return outp;
-        }
+        return outp;
     }
 
     /// <summary>'학번 이름' 표시명 → (학번, 이름). 학번 없으면 ("", 이름).</summary>
