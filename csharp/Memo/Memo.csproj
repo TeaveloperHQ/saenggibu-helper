@@ -3,7 +3,9 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>appicon.ico</ApplicationIcon>   <!-- 작업표시줄 고정·시작 메뉴 아이콘 -->
     <!-- 배포 시 '수업메모.exe'로 리네임(한글 AssemblyName은 avares 리소스 URI와 충돌하므로 ASCII 유지) -->
   </PropertyGroup>
 
@@ -18,7 +20,8 @@
     <AvaloniaResource Include="Assets/**" />
   </ItemGroup>
 
+  <!-- 메모 도구는 가볍게: Core 전체(LLamaSharp·llama.cpp 네이티브·ClosedXML·Sqlite)를 참조하지 않고 필요한 파일만 링크 -->
   <ItemGroup>
-    <ProjectReference Include="..\Core\Core.csproj" />
+    <Compile Include="..\Core\RosterData.cs;..\Core\Settings.cs;..\Core\Prompts.cs;..\Core\PromptsData.cs;..\Core\Autostart.cs" LinkBase="Core" />
   </ItemGroup>
 </Project>

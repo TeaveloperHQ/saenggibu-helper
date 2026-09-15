@@ -70,7 +70,8 @@ public class MainWindow : Window
         var seed = Environment.GetEnvironmentVariable("SGB_SEED");
         if (string.IsNullOrEmpty(seed)) { var b = Path.Combine(AppDir, "seed_corpus.jsonl"); if (File.Exists(b)) seed = b; }   // exe 옆 동봉
         if (!string.IsNullOrEmpty(seed) && File.Exists(seed)) try { _store.LoadSeedCorpus(seed); } catch { }
-        Autostart.EnsureMemoInstalled();   // 메모 도구 자동시작 등록 + 실행(Windows, exe 동봉 시)
+        // 메인 exe에 동봉된 메모 도구를 꺼내고(새 빌드면 교체) → 자동시작 등록 + 트레이 실행. 파일 쓰기가 있어 백그라운드로
+        Task.Run(() => { try { Autostart.InstallEmbeddedMemo(typeof(MainWindow).Assembly); } catch { } Autostart.EnsureMemoInstalled(); });
 
         Title = "생기부 도우미";
         Width = 1000; Height = 800;
@@ -1336,7 +1337,8 @@ public class MainWindow : Window
         return Pad(new StackPanel { Spacing = 12 }.With(new Control[] {
             new TextBlock { Text = "수업 메모 도구", FontSize = 16, FontWeight = FontWeight.Bold },
             new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray, Text =
-                "트레이에 상주하며 수업 중 관찰을 팝업 단축키로 빠르게 학급 명단에 누적합니다(모델 불필요). 저장 시 기존 학생은 내용에 이어붙이고, 없으면 행을 삽입합니다." },
+                "트레이에 상주하며 수업 중 관찰을 팝업 단축키로 빠르게 학급 명단에 누적합니다(모델 불필요). 저장 시 기존 학생은 내용에 이어붙이고, 없으면 행을 삽입합니다.\n" +
+                "작업 표시줄에 고정: 시작 메뉴에서 '수업 메모'를 검색 → 우클릭 → '작업 표시줄에 고정'. 고정한 아이콘을 누르면 메모 창이 바로 뜹니다." },
             chk,
             Row(new TextBlock { Text = "팝업 단축키", VerticalAlignment = VerticalAlignment.Center }, hkBtn, new TextBlock { Text = "(버튼 클릭 후 원하는 조합 누르기)", Foreground = Brushes.Gray, FontSize = 12, VerticalAlignment = VerticalAlignment.Center }),
             openBtn,

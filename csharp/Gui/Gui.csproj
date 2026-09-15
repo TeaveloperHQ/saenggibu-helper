@@ -25,4 +25,34 @@
   <ItemGroup>
     <ProjectReference Include="..\Core\Core.csproj" />
   </ItemGroup>
+
+  <!-- 수업 메모 도구 동봉: Windows 대상 publish(-r win-*) 시 메모를 단일 exe로 publish해 메인 exe에 리소스로 넣는다.
+       메인 앱이 실행되면 %LOCALAPPDATA%\SaenggibuHelper\수업메모.exe 로 꺼내 쓴다 → 포털이 Gui만 빌드해도 메모 포함.
+       개발 빌드(-r 없음)는 건너뜀. 강제: -p:EmbedMemo=true / 끄기: -p:EmbedMemo=false -->
+  <PropertyGroup>
+    <EmbedMemo Condition="'$(EmbedMemo)' == '' And $(RuntimeIdentifier.StartsWith('win'))">true</EmbedMemo>
+    <MemoRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</MemoRid>
+    <MemoRid Condition="'$(MemoRid)' == ''">win-x64</MemoRid>
+    <MemoPublishDir>$(MSBuildProjectDirectory)/obj/memo-embed/$(MemoRid)/</MemoPublishDir>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(EmbedMemo)' == 'true'">
+    <MemoEmbedInputs Include="../Memo/**/*.cs;../Memo/Memo.csproj;../Memo/app.manifest;../Memo/Assets/**;../Core/RosterData.cs;../Core/Settings.cs;../Core/Prompts.cs;../Core/PromptsData.cs;../Core/Autostart.cs"
+                     Exclude="../Memo/bin/**;../Memo/obj/**" />
+  </ItemGroup>
+
+  <Target Name="PublishMemoForEmbed" Condition="'$(EmbedMemo)' == 'true'" Inputs="@(MemoEmbedInputs)" Outputs="$(MemoPublishDir)Memo.exe">
+    <PropertyGroup>
+      <_MemoDotnet>$(DOTNET_HOST_PATH)</_MemoDotnet>
+      <_MemoDotnet Condition="'$(_MemoDotnet)' == ''">dotnet</_MemoDotnet>
+    </PropertyGroup>
+    <Exec Command="&quot;$(_MemoDotnet)&quot; publish &quot;$(MSBuildProjectDirectory)/../Memo/Memo.csproj&quot; -c Release -r $(MemoRid) --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o &quot;$(MemoPublishDir)&quot;" />
+  </Target>
+
+  <Target Name="EmbedMemoResource" BeforeTargets="PrepareForBuild" DependsOnTargets="PublishMemoForEmbed" Condition="'$(EmbedMemo)' == 'true'">
+    <Error Condition="!Exists('$(MemoPublishDir)Memo.exe')" Text="수업 메모 도구 publish 결과가 없습니다: $(MemoPublishDir)Memo.exe" />
+    <ItemGroup>
+      <EmbeddedResource Include="$(MemoPublishDir)Memo.exe" LogicalName="memo.exe" WithCulture="false" Type="Non-Resx" />
+    </ItemGroup>
+  </Target>
 </Project>

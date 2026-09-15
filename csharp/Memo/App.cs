@@ -47,7 +47,15 @@ public class App : Application
             _hotkey = new WinHotkey(() => Dispatcher.UIThread.Post(Show), mods, vk);
             _hotkey.Start();
 
-            if (desktop.Args?.Contains("--popup") == true)   // '지금 메모 열기'로 실행 시 즉시 팝업
+            // 두 번째 실행(작업표시줄 고정 아이콘 클릭 등)이 보내는 '팝업 열기' 요청을 받는다
+            if (OperatingSystem.IsWindows())
+            {
+                var showEv = new System.Threading.EventWaitHandle(false, System.Threading.EventResetMode.AutoReset, Program.ShowEventName);
+                new System.Threading.Thread(() => { while (showEv.WaitOne()) Dispatcher.UIThread.Post(Show); }) { IsBackground = true, Name = "memo-show" }.Start();
+            }
+
+            // 자동시작·메인 앱이 띄울 때(--tray)는 트레이에만 상주, 직접 실행(작업표시줄·시작 메뉴·'지금 메모 열기')이면 바로 팝업
+            if (desktop.Args?.Contains("--tray") != true)
                 Dispatcher.UIThread.Post(Show);
 
             // 메모 도구가 직접 실행되면 자기 자신을 자동시작 등록(상주 지속).

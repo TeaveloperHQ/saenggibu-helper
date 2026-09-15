@@ -17,13 +17,11 @@ OUT="${1:-publish/win-x64}"
 KIWI_VER="0.23.2"
 FLAGS=(-c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$OUT")
 
-echo "▶ 메인 앱 publish → $OUT"
+# 수업 메모 도구는 메인 exe 안에 동봉된다(Gui.csproj EmbedMemo) — 메인 앱 첫 실행 때 %LOCALAPPDATA%\SaenggibuHelper\수업메모.exe 로 꺼냄
+echo "▶ 메인 앱 publish(수업 메모 도구 동봉) → $OUT"
 dotnet publish Gui/Gui.csproj "${FLAGS[@]}"
-echo "▶ 수업 메모 도구 publish → $OUT"
-dotnet publish Memo/Memo.csproj "${FLAGS[@]}"
 
-# 한글 exe명으로 리네임(자동시작 탐색은 '수업메모.exe' 우선)
-[ -f "$OUT/Memo.exe" ] && mv -f "$OUT/Memo.exe" "$OUT/수업메모.exe"
+# 한글 exe명으로 리네임
 [ -f "$OUT/Gui.exe" ]  && mv -f "$OUT/Gui.exe"  "$OUT/생기부도우미.exe"
 
 # ── ② Kiwi 네이티브(win-x64 kiwi.dll) ──
