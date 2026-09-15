@@ -60,13 +60,24 @@ public class MemoPopup : Window
         {
             Background = Brushes.White, BorderBrush = Brush.Parse("#c7c9d1"), BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(16), Padding = new Thickness(14, 6, 10, 6),
-            Child = new StackPanel
-            {
-                Orientation = Orientation.Horizontal, Spacing = 7, VerticalAlignment = VerticalAlignment.Center,
-                Children = { new Image { Width = 24, Height = 24, Source = icon, VerticalAlignment = VerticalAlignment.Center }, _class, _num, _name, _area, _subject, new Panel { Width = 6 }, _memo, _status, save, close },
-            },
+            Child = new DockPanel { VerticalAlignment = VerticalAlignment.Center },
         };
-        _memo.Width = 300;
+        // 왼쪽 선택 칸·오른쪽 버튼은 고정, 메모 칸이 남는 폭을 채움(예전: 전부 고정 폭이라 창보다 넓어 오른쪽이 잘렸음)
+        var left = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 7, Margin = new Thickness(0, 0, 13, 0), VerticalAlignment = VerticalAlignment.Center,
+            Children = { new Image { Width = 24, Height = 24, Source = icon, VerticalAlignment = VerticalAlignment.Center }, _class, _num, _name, _area, _subject },
+        };
+        var right = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 7, Margin = new Thickness(7, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
+            Children = { _status, save, close },
+        };
+        DockPanel.SetDock(left, Dock.Left);
+        DockPanel.SetDock(right, Dock.Right);
+        var dock = (DockPanel)bar.Child;
+        dock.Children.Add(left); dock.Children.Add(right); dock.Children.Add(_memo);
+        _memo.MinWidth = 160;
         Content = bar;
 
         foreach (var b in new[] { _class, _num, _name })
@@ -102,11 +113,14 @@ public class MemoPopup : Window
     {
         ReloadAll();
         _memo.Text = ""; _status.Text = "";
-        var screen = Screens.Primary?.WorkingArea ?? new PixelRect(0, 0, 1280, 800);
-        int w = Math.Min(880, screen.Width - 40);
+        // WorkingArea·Position은 물리 픽셀, Width·Height는 DIP → 화면 배율(예: 125%)로 환산해야 오른쪽이 화면 밖으로 안 나감
+        var scr = Screens.Primary;
+        var screen = scr?.WorkingArea ?? new PixelRect(0, 0, 1280, 800);
+        double scale = scr?.Scaling ?? 1.0;
+        double w = Math.Min(1060, screen.Width / scale - 28);
         Width = w;
-        int x = screen.X + screen.Width - w - 14;
-        int y = screen.Y + screen.Height - (int)Height - 12;
+        int x = screen.X + screen.Width - (int)Math.Ceiling((w + 14) * scale);
+        int y = screen.Y + screen.Height - (int)Math.Ceiling((Height + 12) * scale);
         Position = new PixelPoint(x, y);
         Show(); Activate();
         Dispatcher.UIThread.Post(() => _memo.Focus());
