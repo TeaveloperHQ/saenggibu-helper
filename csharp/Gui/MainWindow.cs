@@ -38,6 +38,16 @@ public class RowVm
     }
 }
 
+/// <summary>학습 후보 한 줄(셀 하나) — 목록에서 체크한 것만 학습한다.</summary>
+public class CandVm
+{
+    public bool Sel { get; set; } = true;
+    public string AreaKey { get; set; } = "";
+    public string AreaTitle { get; set; } = "";
+    public string Source { get; set; } = "";
+    public string Text { get; set; } = "";
+}
+
 // 시트 되돌리기(Ctrl+Z) 스냅샷 — RowVm 참조를 유지해 행 높이(참조 키) 보존
 internal sealed record SheetSnap(List<(RowVm vm, string num, string name, string content, Dictionary<string, string> extra)> Rows,
     List<(string id, string label)> Ext, string NumLabel, string NameLabel, string ContentLabel);
@@ -70,8 +80,14 @@ public class MainWindow : Window
         var seed = Environment.GetEnvironmentVariable("SGB_SEED");
         if (string.IsNullOrEmpty(seed)) { var b = Path.Combine(AppDir, "seed_corpus.jsonl"); if (File.Exists(b)) seed = b; }   // exe 옆 동봉
         if (!string.IsNullOrEmpty(seed) && File.Exists(seed)) try { _store.LoadSeedCorpus(seed); } catch { }
+        // 메모 도구가 여기서 메인 앱을 띄울 수 있게 실행 파일 경로를 남긴다(개발 실행 dotnet.exe는 제외)
+        if (Environment.ProcessPath is { } mainExe && mainExe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            && !Path.GetFileNameWithoutExtension(mainExe).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            try { _settings.Set("main_exe_path", mainExe); } catch { }
+
         // 메인 exe에 동봉된 메모 도구를 꺼내고(새 빌드면 교체) → 자동시작 등록 + 트레이 실행. 파일 쓰기가 있어 백그라운드로
-        Task.Run(() => { try { Autostart.InstallEmbeddedMemo(typeof(MainWindow).Assembly); } catch { } Autostart.EnsureMemoInstalled(); });
+        if (!_settings.Get<bool>("memo_removed"))   // 메모 탭에서 '제거'했으면 다시 깔지 않는다
+            Task.Run(() => { try { Autostart.InstallEmbeddedMemo(typeof(MainWindow).Assembly); } catch { } Autostart.EnsureMemoInstalled(); });
 
         Title = "생기부 도우미";
         Width = 1000; Height = 800;
@@ -296,7 +312,12 @@ public class MainWindow : Window
         var input = new TextBox { Watermark = Area().InputHint, AcceptsReturn = true, Height = 80, TextWrapping = TextWrapping.Wrap };
         var morph = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var morphBox = new Border { Background = Brush.Parse("#fafafa"), BorderBrush = Brush.Parse("#e0e0e0"), BorderThickness = new Thickness(1), Height = 46, Padding = new Thickness(6, 4), Child = new ScrollViewer { Content = morph } };
-        var compliance = new TextBlock { Foreground = Brush.Parse("#c62828"), FontSize = 11, TextWrapping = TextWrapping.Wrap, IsVisible = false };
+        var compliance = new TextBlock { Foreground = Brush.Parse("#c62828"), FontSize = 11, TextWrapping = TextWrapping.Wrap };
+        var complianceRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 5, IsVisible = false,
+            Children = { SgbIcon.Make("alert", 13, "#c62828"), compliance },
+        };
         var legend = new TextBlock { FontSize = 11, Foreground = Brush.Parse("#666"), Inlines = {
             new Run { Text = "형태소 점검: " }, new Run { Text = "■ 사전에 없는 말", Foreground = Brush.Parse("#e65100"), FontWeight = FontWeight.Bold },
             new Run { Text = "  " }, new Run { Text = "■ 영문/한자", Foreground = Brush.Parse("#1565c0"), FontWeight = FontWeight.Bold },
@@ -309,9 +330,9 @@ public class MainWindow : Window
         input.PropertyChanged += (_, e) =>
         {
             if (e.Property != TextBox.TextProperty) return;
-            compliance.IsVisible = false;
+            complianceRow.IsVisible = false;
             var v = Compliance.Summary(input.Text ?? "");
-            if (v.Length > 0) { compliance.Text = "⚠ " + v; compliance.IsVisible = true; }
+            if (v.Length > 0) { compliance.Text = v; complianceRow.IsVisible = true; }
             morphTimer?.Stop();
             morphTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
             morphTimer.Tick += (_, _) => { morphTimer!.Stop(); _ = UpdateMorphAsync(input.Text ?? "", morph); };
@@ -677,46 +698,14 @@ public class MainWindow : Window
 
         var addRow = new Button { Content = "행 추가" }; addRow.Click += (_, _) => rows.Add(new RowVm());
         var saveSheet = new Button { Content = IconText("save", "저장", 16, "#ffffff"), FontWeight = FontWeight.Bold, Background = Brush.Parse("#2e7d32"), Foreground = Brushes.White };
-        saveSheet.Click += async (_, _) =>
+        // 저장은 순수하게 저장만 한다(학습은 학습 모드의 '입력 내용 스캔해 학습'에서 따로 실행)
+        saveSheet.Click += (_, _) =>
         {
             string k = CurClass(); if (k.Length == 0 || k == "＋") { sheetMsg.Text = "저장할 학급 탭을 선택하세요(없으면 ＋ 로 추가)."; return; }
             RosterData.WriteRowsExtended(_dataDir, Area().Key, k, numLabel, nameLabel, contentLabel, extraCols,
                 rows.Select(r => (r.Num, r.Name, r.Content, (IReadOnlyList<string>)extraCols.Select(c => r[c.id]).ToList())));
             SaveView();   // 열 고정·숨김·너비·행높이도 함께 저장
-            // 학습(백그라운드): ① 규칙 판별(문장 꼴) ② 이미 학습·버린 문장 제외 ③ 언어 모델이 '생기부 기재 문장인지' 판별 ④ 키워드 = 문장 속 명사
-            // (예전: 3번째 열을 무조건 매 저장마다 추가 → 엑셀 시트의 '학기' 같은 숫자 열이 중복 학습됐고, 키워드 칸엔 학생 이름이 들어갔음)
-            string subj = subject.IsVisible ? (subject.Text ?? "").Trim() : "";
-            string areaKey = Area().Key, areaTitle = Area().Title, msgKey = MsgKey();
-            var cands = new List<string>();
-            foreach (var r in rows)
-                for (int di = 2; di < grid.Columns.Count; di++)
-                {
-                    string t = GetCell(r, di).Trim();
-                    if (LearnFilter.LooksLikeSentence(t) && !cands.Contains(t) && !_store.HasExample(areaKey, t)) cands.Add(t);
-                }
-            if (cands.Count == 0) sheetMsg.Text = $"'{k}' 저장 · 새로 학습할 문장 없음(이미 학습했거나 문장이 아님).";
-            else
-            {
-                sheetMsg.Text = $"'{k}' 저장 · 새 문장 {cands.Count}건 학습 검토 중…(언어 모델, 첫 실행은 모델 로딩으로 수십 초)";
-                var res = await Task.Run(() =>
-                {
-                    bool llm = true; try { EnsureEngines(); } catch { llm = false; }
-                    var ok = new List<(string text, string kw)>(); int rejected = 0;
-                    foreach (var t in cands)
-                    {
-                        if (llm && LearnFilter.IsRecordSentence(_engine!, areaTitle, t) == false) { rejected++; continue; }
-                        ok.Add((t, LearnKeywords(t)));
-                    }
-                    return (ok, rejected, llm);
-                });
-                int learned = 0;
-                foreach (var (t, kw) in res.ok) if (_store.AddExampleIfNew(areaKey, subj, kw, t)) learned++;
-                SetMsgFor(msgKey, $"'{k}' 저장 · 새 문장 {learned}건 학습"
-                    + (res.rejected > 0 ? $" · {res.rejected}건은 생기부 문장이 아니라 제외" : "")
-                    + (res.llm ? "." : " (언어 모델 없음 — 규칙 판별만 적용)."));
-            }
-            RefreshLearn();
-            if (_learnStatus != null) _learnStatus.Text = $"학습 예시: 총 {_store.CountLearned()}건";
+            sheetMsg.Text = $"'{k}' 저장했습니다. 학습은 학습 모드에서 '입력 내용 스캔해 학습'을 누르세요.";
         };
         var importX = new Button { Content = IconText("import", "엑셀 불러오기") };
         importX.Click += async (_, _) =>
@@ -877,9 +866,9 @@ public class MainWindow : Window
         // 열머리글 메뉴
         var miColRename = new MenuItem { Header = "이름 변경" };
         miColRename.Click += (_, _) => RenameCol(ctxColIdx);
-        var miColLeft = new MenuItem { Header = "◀ 왼쪽에 열 삽입" };
+        var miColLeft = new MenuItem { Header = IconText("arrow-left", "왼쪽에 열 삽입", 14) };
         miColLeft.Click += (_, _) => InsertCol(Math.Max(Fixed, ctxColIdx));
-        var miColRight = new MenuItem { Header = "오른쪽에 열 삽입 ▶" };
+        var miColRight = new MenuItem { Header = IconText("arrow-right", "오른쪽에 열 삽입", 14) };
         miColRight.Click += (_, _) => InsertCol(Math.Max(Fixed, ctxColIdx + 1));
         var miColDel = new MenuItem { Header = "열 삭제" };
         miColDel.Click += (_, _) => DeleteCol(ctxColIdx);
@@ -896,9 +885,9 @@ public class MainWindow : Window
         var colItems = new Control[] { miColRename, miColLeft, miColRight, miColDel, new Separator(), miColFit, miColFreeze, miColUnfreeze, new Separator(), miColHide, miColUnhide };
 
         // 행머리글 메뉴
-        var miRowAbove = new MenuItem { Header = "▲ 위에 행 삽입" };
+        var miRowAbove = new MenuItem { Header = IconText("arrow-up", "위에 행 삽입", 14) };
         miRowAbove.Click += (_, _) => InsertRow(ctxRowIdx >= 0 ? ctxRowIdx : rows.Count);
-        var miRowBelow = new MenuItem { Header = "아래에 행 삽입 ▼" };
+        var miRowBelow = new MenuItem { Header = IconText("down", "아래에 행 삽입", 14) };
         miRowBelow.Click += (_, _) => InsertRow(ctxRowIdx >= 0 ? ctxRowIdx + 1 : rows.Count);
         var miRowDel = new MenuItem { Header = "행 삭제" };
         miRowDel.Click += (_, _) =>
@@ -1177,7 +1166,7 @@ public class MainWindow : Window
         var topPanel = new StackPanel { Spacing = 6, Children = {
             areaStrip,
             HRow(new TextBlock { Text = "과목", VerticalAlignment = VerticalAlignment.Center }, subject, genOpts, new Control { Width = 12 }, learnLabel),
-            new TextBlock { Text = "입력 (키워드·관찰 메모)", Margin = new Thickness(0, 6, 0, 0) }, input, morphBox, compliance,
+            new TextBlock { Text = "입력 (키워드·관찰 메모)", Margin = new Thickness(0, 6, 0, 0) }, input, morphBox, complianceRow,
             HRow(legend, termBtn), genRow } };
         bool fs = false;
         fsBtn.Click += (_, _) => { fs = !fs; topPanel.IsVisible = !fs; fsBtn.Content = IconText("maximize", fs ? "원래대로" : "전체화면"); };
@@ -1283,10 +1272,137 @@ public class MainWindow : Window
         add.Click += (_, _) => { if (_glossary.Add(edit.Text ?? "")) { edit.Text = ""; Refresh(); } };
         del.Click += (_, _) => { if (list.SelectedItem is string s && _glossary.Remove(s)) Refresh(); };
         Control HRow(params Control[] cs) { var p = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 }; foreach (var c in cs) p.Children.Add(c); return p; }
+        // ── 학습 후보 고르기: 시트·엑셀에서 셀 단위로 불러와 눈으로 확인하고, 체크한 문장만 학습 ──
+        var cands = new ObservableCollection<CandVm>();
+        var candGrid = new DataGrid
+        {
+            Height = 240, AutoGenerateColumns = false, IsReadOnly = false, CanUserResizeColumns = true,
+            HeadersVisibility = DataGridHeadersVisibility.Column, GridLinesVisibility = DataGridGridLinesVisibility.All,
+            ItemsSource = cands,
+        };
+        candGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "학습", Binding = new Binding("Sel") { Mode = BindingMode.TwoWay }, Width = new DataGridLength(52) });
+        candGrid.Columns.Add(new DataGridTextColumn { Header = "영역", Binding = new Binding("AreaTitle"), Width = new DataGridLength(120), IsReadOnly = true });
+        candGrid.Columns.Add(new DataGridTextColumn { Header = "출처", Binding = new Binding("Source"), Width = new DataGridLength(170), IsReadOnly = true });
+        candGrid.Columns.Add(new DataGridTextColumn { Header = "문장", Binding = new Binding("Text"), Width = new DataGridLength(1, DataGridLengthUnitType.Star), IsReadOnly = true });
+
+        var areaPick = new ComboBox { Width = 150 };   // 엑셀로 불러온 문장을 어느 영역으로 학습할지
+        foreach (var a in Prompts.Areas) areaPick.Items.Add(a.Title);
+        areaPick.SelectedIndex = 0;
+
+        HashSet<string> SeenKeys() => new(cands.Select(c => c.AreaKey + "\u0001" + c.Text));
+        void AddCand(string areaKey, string areaTitle, string source, string? text, HashSet<string> seen, HashSet<string> rejected)
+        {
+            string t = (text ?? "").Trim();
+            if (!LearnFilter.LooksLikeSentence(t)) return;                      // 숫자·학기·이름 같은 값 제외
+            if (rejected.Contains(t) || _store.HasExample(areaKey, t)) return;  // 이미 학습했거나 버린 문장 제외
+            if (!seen.Add(areaKey + "\u0001" + t)) return;
+            cands.Add(new CandVm { AreaKey = areaKey, AreaTitle = areaTitle, Source = source, Text = t });
+        }
+
+        var fromSheets = new Button { Content = IconText("clipboard", "시트에서 불러오기", 15) };
+        fromSheets.Click += (_, _) =>
+        {
+            cands.Clear();
+            var seen = SeenKeys();
+            foreach (var area in Prompts.Areas)
+            {
+                var rejected = new HashSet<string>(_store.RejectedTexts(area.Key, 1000));
+                foreach (var klass in RosterData.ClassNames(_dataDir, area.Key))
+                {
+                    var (_, _, clbl, ext, rr) = RosterData.ReadRowsExtended(_dataDir, area.Key, klass);
+                    foreach (var row in rr)
+                    {
+                        string who = row.name.Length > 0 ? row.name : row.num;
+                        AddCand(area.Key, area.Title, klass + " · " + who + " · " + clbl, row.content, seen, rejected);
+                        for (int i = 0; i < row.extraVals.Count && i < ext.Count; i++)
+                            AddCand(area.Key, area.Title, klass + " · " + who + " · " + ext[i].label, row.extraVals[i], seen, rejected);
+                    }
+                }
+            }
+            status.Text = cands.Count > 0
+                ? cands.Count + "건 불러옴 — 체크한 문장만 학습됩니다."
+                : "새로 학습할 문장이 없습니다(이미 학습했거나 문장이 아님).";
+        };
+
+        var fromXlsx = new Button { Content = IconText("import", "엑셀에서 불러오기", 15) };
+        fromXlsx.Click += async (_, _) =>
+        {
+            var f = (await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { AllowMultiple = false }))?.FirstOrDefault();
+            if (f == null) return;
+            var area = Prompts.Areas[Math.Max(0, areaPick.SelectedIndex)];
+            try
+            {
+                var (hdrs, xrows) = Importer.ParseXlsxFull(f.Path.LocalPath);   // 시트는 건드리지 않고 파일의 셀만 읽는다
+                var seen = SeenKeys();
+                var rejected = new HashSet<string>(_store.RejectedTexts(area.Key, 1000));
+                int before = cands.Count;
+                for (int r = 0; r < xrows.Count; r++)
+                    for (int c = 0; c < xrows[r].Count; c++)
+                    {
+                        string col = c < hdrs.Count && hdrs[c].Length > 0 ? hdrs[c] : (c + 1) + "열";
+                        AddCand(area.Key, area.Title, f.Name + " · " + (r + 1) + "행 " + col, xrows[r][c], seen, rejected);
+                    }
+                status.Text = (cands.Count - before) + "건 불러옴 — 영역 " + area.Title + "으로 학습됩니다. 체크한 문장만 반영돼요.";
+            }
+            catch (Exception ex) { status.Text = "오류: " + ex.Message; }
+        };
+
+        void Recheck() { candGrid.ItemsSource = null; candGrid.ItemsSource = cands; }
+        var checkAll = new Button { Content = "전체 선택" };
+        checkAll.Click += (_, _) => { foreach (var c in cands) c.Sel = true; Recheck(); };
+        var uncheckAll = new Button { Content = "전체 해제" };
+        uncheckAll.Click += (_, _) => { foreach (var c in cands) c.Sel = false; Recheck(); };
+        var clearCands = new Button { Content = "목록 비우기" };
+        clearCands.Click += (_, _) => { cands.Clear(); status.Text = ""; };
+        var llmChk = new CheckBox { Content = "언어 모델로 한 번 더 걸러내기", VerticalAlignment = VerticalAlignment.Center };
+
+        var learnSel = new Button { Content = IconText("check", "선택한 문장 학습", 15, "#ffffff"), FontWeight = FontWeight.Bold, Background = Brush.Parse("#2e7d32"), Foreground = Brushes.White };
+        learnSel.Click += async (_, _) =>
+        {
+            var picked = cands.Where(c => c.Sel).ToList();
+            if (picked.Count == 0) { status.Text = "학습할 문장을 체크하세요."; return; }
+            learnSel.IsEnabled = false;
+            try
+            {
+                int dropped = 0;
+                if (llmChk.IsChecked == true)
+                {
+                    status.Text = picked.Count + "건 검토 중…(언어 모델, 첫 실행은 모델 로딩으로 수십 초)";
+                    var keep = await Task.Run(() =>
+                    {
+                        try { EnsureEngines(); } catch { return picked; }   // 모델 없으면 고른 그대로
+                        return picked.Where(c => LearnFilter.IsRecordSentence(_engine!, c.AreaTitle, c.Text) != false).ToList();
+                    });
+                    dropped = picked.Count - keep.Count;
+                    picked = keep;
+                }
+                else status.Text = picked.Count + "건 학습 중…";
+                var kws = await Task.Run(() => picked.Select(c => LearnKeywords(c.Text)).ToList());
+                int learned = 0;
+                for (int i = 0; i < picked.Count; i++)
+                    if (_store.AddExampleIfNew(picked[i].AreaKey, "", kws[i], picked[i].Text)) learned++;
+                foreach (var c in picked) cands.Remove(c);
+                status.Text = learned + "건 학습" + (dropped > 0 ? " · " + dropped + "건은 생기부 문장이 아니라 제외" : "") + ".";
+                _learnStatus.Text = "학습 예시: 총 " + _store.CountLearned() + "건 (씨드 " + _store.SeedCount() + ")";
+            }
+            catch (Exception ex) { status.Text = "오류: " + ex.Message; }
+            finally { learnSel.IsEnabled = true; }
+        };
+
         return Pad(new StackPanel { Spacing = 10 }.With(new Control[] {
-            new TextBlock { Text = "📚 학습 모드", FontSize = 16, FontWeight = FontWeight.Bold },
+            new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children =
+                { SgbIcon.Make("book", 18), new TextBlock { Text = "학습 모드", FontSize = 16, FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center } } },
             HRow(new TextBlock { Text = "기본 모델", VerticalAlignment = VerticalAlignment.Center }, modelCombo, dl),
             _learnStatus, HRow(backup, restore),
+            new TextBlock { Text = "학습할 문장 고르기", FontWeight = FontWeight.Bold, Margin = new Thickness(0, 8, 0, 0) },
+            new TextBlock { Foreground = Brushes.Gray, FontSize = 12, TextWrapping = TextWrapping.Wrap, Text =
+                "시트의 '저장'은 저장만 합니다. 학습은 여기서 체크한 문장만 반영돼요.\n" +
+                "· 시트에서 불러오기 — 모든 영역·학급 시트의 내용 칸을 셀 단위로 훑어 옵니다.\n" +
+                "· 엑셀에서 불러오기 — 정해진 양식은 없습니다. 파일의 모든 셀을 읽어 문장처럼 보이는 것(15자 이상·한글 8자 이상·띄어쓰기 있음)만 골라 오고, 학급 시트는 건드리지 않아요. 불러온 문장은 옆에서 고른 '엑셀 학습 영역'으로 학습됩니다.\n" +
+                "· 이미 학습했거나 전에 버린 문장은 목록에 올라오지 않아요. 체크를 켠 채 '선택한 문장 학습'을 누르면 그 문장만 학습합니다." },
+            HRow(fromSheets, fromXlsx, new TextBlock { Text = "엑셀 학습 영역", VerticalAlignment = VerticalAlignment.Center }, areaPick),
+            candGrid,
+            HRow(checkAll, uncheckAll, clearCands, llmChk, learnSel),
             new TextBlock { Text = "등록 용어(변형 시 철자 보존)", FontWeight = FontWeight.Bold, Margin = new Thickness(0,8,0,0) },
             list, HRow(edit, add, del), status }));
     }
@@ -1333,6 +1449,54 @@ public class MainWindow : Window
             status.Text = Autostart.LaunchMemo(popup: true) ? "메모 도구를 실행했습니다." : "메모 실행 파일을 찾을 수 없습니다(Memo 프로젝트 빌드 필요).";
         };
 
+        // 메모 도구 제거(자료는 그대로) — 실수 방지로 한 번 더 확인받고, 제거 후엔 같은 버튼이 '다시 설치'가 된다
+        var removeBtn = new Button();
+        bool confirming = false;
+        void PaintRemoveBtn()
+        {
+            bool gone = _settings.Get<bool>("memo_removed");
+            removeBtn.Content = gone ? IconText("down", "메모 도구 다시 설치", 15)
+                : confirming ? IconText("alert", "한 번 더 누르면 제거", 15, "#c62828")
+                : IconText("trash", "메모 도구 제거", 15, "#c62828");
+        }
+        PaintRemoveBtn();
+        if (!OperatingSystem.IsWindows()) removeBtn.IsEnabled = false;
+        removeBtn.Click += (_, _) =>
+        {
+            if (!OperatingSystem.IsWindows()) return;
+            if (_settings.Get<bool>("memo_removed"))
+            {
+                _settings.Set("memo_removed", false);
+                status.Text = "메모 도구를 다시 설치하는 중…";
+                Task.Run(() =>
+                {
+                    try { Autostart.InstallEmbeddedMemo(typeof(MainWindow).Assembly); } catch { }
+                    Autostart.EnsureMemoInstalled();
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        chk.IsChecked = Autostart.IsRegistered();
+                        status.Text = Autostart.FindMemoExe() != null
+                            ? "다시 설치했습니다 — 시작 메뉴에서 '수업 메모'로 찾을 수 있어요."
+                            : "설치할 메모 파일이 없습니다(이 빌드에 동봉되지 않음).";
+                    });
+                });
+            }
+            else if (!confirming)
+            {
+                confirming = true;
+                status.Text = "메모 도구만 지웁니다 — 학급 명단·학습 자료는 그대로 남습니다.";
+            }
+            else
+            {
+                Autostart.UninstallMemo();
+                _settings.Set("memo_removed", true);
+                confirming = false;
+                chk.IsChecked = false;
+                status.Text = "메모 도구를 제거했습니다(자료는 그대로). 작업 표시줄에 고정해 둔 아이콘은 직접 고정 해제해 주세요.";
+            }
+            PaintRemoveBtn();
+        };
+
         Control Row(params Control[] cs) { var p = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center }; foreach (var c in cs) p.Children.Add(c); return p; }
         return Pad(new StackPanel { Spacing = 12 }.With(new Control[] {
             new TextBlock { Text = "수업 메모 도구", FontSize = 16, FontWeight = FontWeight.Bold },
@@ -1341,7 +1505,7 @@ public class MainWindow : Window
                 "작업 표시줄에 고정: 시작 메뉴에서 '수업 메모'를 검색 → 우클릭 → '작업 표시줄에 고정'. 고정한 아이콘을 누르면 메모 창이 바로 뜹니다." },
             chk,
             Row(new TextBlock { Text = "팝업 단축키", VerticalAlignment = VerticalAlignment.Center }, hkBtn, new TextBlock { Text = "(버튼 클릭 후 원하는 조합 누르기)", Foreground = Brushes.Gray, FontSize = 12, VerticalAlignment = VerticalAlignment.Center }),
-            openBtn,
+            Row(openBtn, removeBtn),
             OperatingSystem.IsWindows() ? new Panel() : new TextBlock { Text = "자동 실행·전역 단축키는 Windows에서 동작합니다.", Foreground = Brushes.Gray, FontSize = 12 },
             status,
         }));

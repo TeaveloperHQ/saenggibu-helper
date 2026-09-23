@@ -17,10 +17,15 @@ public static class Autostart
 
     public static bool IsSupported => OperatingSystem.IsWindows();
 
-    /// <summary>메인 exe에 동봉된 메모 도구를 꺼내 두는 고정 경로(작업표시줄 고정·자동시작 대상).</summary>
-    public static string MemoInstallPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        OperatingSystem.IsWindows() ? "SaenggibuHelper" : "saenggibu-helper", "수업메모.exe");
+    private static string AppFolder => OperatingSystem.IsWindows() ? "SaenggibuHelper" : "saenggibu-helper";
+    private static string LocalAppData => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+    /// <summary>메인 exe에 동봉된 메모 도구를 꺼내 두는 고정 경로(작업표시줄 고정·자동시작 대상).
+    /// 자료 폴더와 분리된 프로그램 폴더 — 프로그램만 지워도 학급 명단·학습 DB는 남는다.</summary>
+    public static string MemoInstallPath => Path.Combine(LocalAppData, "Programs", AppFolder, "수업메모.exe");
+
+    /// <summary>예전 설치 위치(자료 폴더 안). 새 위치에 설치한 뒤 지운다.</summary>
+    private static string LegacyMemoInstallPath => Path.Combine(LocalAppData, AppFolder, "수업메모.exe");
 
     /// <summary>메모 exe를 찾는다 — 메인 exe 옆(publish-win.sh 폴더 배포) → 꺼내 둔 설치 경로. 없으면 null.</summary>
     public static string? FindMemoExe()
@@ -31,7 +36,8 @@ public static class Autostart
             var p = Path.Combine(dir, name);
             if (File.Exists(p)) return p;
         }
-        return File.Exists(MemoInstallPath) ? MemoInstallPath : null;
+        if (File.Exists(MemoInstallPath)) return MemoInstallPath;
+        return File.Exists(LegacyMemoInstallPath) ? LegacyMemoInstallPath : null;
     }
 
     /// <summary>실행할 메모 바이너리(배포=exe/리눅스 실행파일, 개발=형제 Memo/bin의 Memo.dll)를 찾는다.</summary>
@@ -44,6 +50,7 @@ public static class Autostart
             if (File.Exists(p)) return p;
         }
         if (File.Exists(MemoInstallPath)) return MemoInstallPath;
+        if (File.Exists(LegacyMemoInstallPath)) return LegacyMemoInstallPath;
         // 개발 폴백: …/Gui/bin/<cfg>/<tfm>/ 옆의 …/Memo/bin/.../Memo.dll
         try
         {
@@ -92,6 +99,22 @@ public static class Autostart
         k?.SetValue(AppName, $"\"{exePath}\" --tray");   // 부팅 시엔 팝업 없이 트레이에만 상주
     }
 
+    /// <summary>자동시작에 등록된 exe 경로(따옴표·인자 제외). 등록 안 됐으면 null.</summary>
+    [SupportedOSPlatform("windows")]
+    public static string? RegisteredPath()
+    {
+        using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKey);
+        if (k?.GetValue(AppName) is not string v) return null;
+        v = v.Trim();
+        if (v.StartsWith('"'))
+        {
+            int end = v.IndexOf('"', 1);
+            return end > 0 ? v[1..end] : v[1..];
+        }
+        int sp = v.IndexOf(" --", StringComparison.Ordinal);
+        return sp > 0 ? v[..sp] : v;
+    }
+
     [SupportedOSPlatform("windows")]
     public static void Unregister()
     {
@@ -108,7 +131,7 @@ public static class Autostart
         if (exe == null) return;
         try
         {
-            if (!IsRegistered()) Register(exe);
+            if (!string.Equals(RegisteredPath(), exe, StringComparison.OrdinalIgnoreCase)) Register(exe);
             var procName = Path.GetFileNameWithoutExtension(exe);
             if (Process.GetProcessesByName(procName).Length == 0)
                 Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true, Arguments = "--tray" });
@@ -138,18 +161,63 @@ public static class Autostart
             File.Move(tmp, exe, overwrite: true);
             File.WriteAllText(stampPath, build);
         }
+        CleanupLegacyInstall();
         CreateStartMenuShortcut(exe);
         return true;
     }
 
-    /// <summary>시작 메뉴 '수업 메모' 바로가기(없을 때만). 시작 메뉴에서 우클릭 → 작업 표시줄에 고정.</summary>
+    /// <summary>메모 도구 제거 — 실행 중이면 끄고, 자동시작 해제, 설치 폴더·시작 메뉴 바로가기 삭제.
+    /// 학급 명단·학습 DB 등 자료 폴더는 건드리지 않는다.</summary>
+    [SupportedOSPlatform("windows")]
+    public static void UninstallMemo()
+    {
+        try { Unregister(); } catch { }
+        foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(MemoInstallPath)))
+            using (p) try { p.Kill(); p.WaitForExit(5000); } catch { }
+        try
+        {
+            var dir = Path.GetDirectoryName(MemoInstallPath)!;
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+        catch { }
+        try
+        {
+            if (File.Exists(LegacyMemoInstallPath)) File.Delete(LegacyMemoInstallPath);
+            if (File.Exists(LegacyMemoInstallPath + ".build")) File.Delete(LegacyMemoInstallPath + ".build");
+        }
+        catch { }
+        try
+        {
+            var lnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "수업 메모.lnk");
+            if (File.Exists(lnk)) File.Delete(lnk);
+        }
+        catch { }
+    }
+
+    /// <summary>예전에 자료 폴더 안에 설치했던 메모 exe·스탬프 제거(명단·학습 DB 등 자료 파일은 건드리지 않음).</summary>
+    [SupportedOSPlatform("windows")]
+    private static void CleanupLegacyInstall()
+    {
+        try
+        {
+            var old = LegacyMemoInstallPath;
+            if (!File.Exists(old)) return;
+            foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(old)))
+                using (p)
+                    try { if (string.Equals(p.MainModule?.FileName, old, StringComparison.OrdinalIgnoreCase)) { p.Kill(); p.WaitForExit(5000); } } catch { }
+            File.Delete(old);
+            if (File.Exists(old + ".build")) File.Delete(old + ".build");
+        }
+        catch { /* 남아 있어도 동작에는 지장 없음 */ }
+    }
+
+    /// <summary>시작 메뉴 '수업 메모' 바로가기(경로가 바뀌면 갱신). 시작 메뉴에서 우클릭 → 작업 표시줄에 고정.</summary>
     [SupportedOSPlatform("windows")]
     private static void CreateStartMenuShortcut(string exe)
     {
         try
         {
             var lnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "수업 메모.lnk");
-            if (File.Exists(lnk)) return;
             var shellType = Type.GetTypeFromProgID("WScript.Shell");
             if (shellType == null) return;
             var shell = Activator.CreateInstance(shellType)!;

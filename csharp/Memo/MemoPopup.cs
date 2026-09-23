@@ -6,6 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Gui;
 using Saenggibu;
 using System;
 using System.Collections.Generic;
@@ -24,9 +25,9 @@ public class MemoPopup : Window
     private readonly string _dataDir;
     private readonly Settings _settings;
     private readonly AutoCompleteBox _class, _num, _name;
-    private readonly ComboBox _area, _subject;
+    private readonly ComboBox _area;
     private readonly TextBox _memo;
-    private readonly TextBlock _status;
+    private readonly ContentControl _status;
     private List<(string klass, string num, string name)> _records = new();
     private bool _syncing;
 
@@ -46,14 +47,24 @@ public class MemoPopup : Window
         _name = MkBox("이름", 110);
         _area = new ComboBox { Width = 150 };
         foreach (var a in Prompts.Areas) _area.Items.Add(a.Title);
-        _area.SelectionChanged += (_, _) => { ReloadRecords(); SyncSubject(); };
-        _subject = new ComboBox { Width = 100, IsVisible = false };
+        _area.SelectionChanged += (_, _) => ReloadRecords();
         _memo = new TextBox { Watermark = "관찰 메모 입력 · Ctrl+S 저장 · Enter 줄바꿈", AcceptsReturn = true, Height = 40, MinHeight = 0, VerticalContentAlignment = VerticalAlignment.Center };
-        _status = new TextBlock { Width = 20, FontSize = 16, VerticalAlignment = VerticalAlignment.Center, Foreground = Brush.Parse("#16a34a") };
+        // 가로 스크롤바는 띄우지 않는다(예전: 두꺼운 바가 한 줄짜리 메모 칸의 글자를 가림). 긴 글은 커서를 따라 저절로 밀려서 보인다
+        ScrollViewer.SetHorizontalScrollBarVisibility(_memo, Avalonia.Controls.Primitives.ScrollBarVisibility.Hidden);
+        _status = new ContentControl { Width = 20, VerticalAlignment = VerticalAlignment.Center };
+
+        // 메모에서 메인 앱 열기(이미 떠 있으면 그 창을 앞으로)
+        var openApp = new Button { Content = IconText("edit", "생기부", 15, "#2e7d32"), Background = Brushes.Transparent };
+        ToolTip.SetTip(openApp, "생기부 도우미 메인 앱 열기");
+        openApp.Click += (_, _) =>
+        {
+            if (MainApp.Launch(_settings)) Hide();
+            else { Flash("alert", "#dc2626"); _memo.Watermark = "메인 앱을 찾지 못했어요 — 생기부 도우미를 한 번 실행하면 연결됩니다"; }
+        };
 
         var save = new Button { Content = "저장", Background = Brush.Parse("#2e7d32"), Foreground = Brushes.White };
         save.Click += (_, _) => Save();
-        var close = new Button { Content = "✕", Background = Brushes.Transparent, Foreground = Brush.Parse("#9ca3af") };
+        var close = new Button { Content = SgbIcon.Make("x", 14, "#9ca3af"), Background = Brushes.Transparent };
         close.Click += (_, _) => Hide();
 
         var bar = new Border
@@ -66,12 +77,12 @@ public class MemoPopup : Window
         var left = new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 7, Margin = new Thickness(0, 0, 13, 0), VerticalAlignment = VerticalAlignment.Center,
-            Children = { new Image { Width = 24, Height = 24, Source = icon, VerticalAlignment = VerticalAlignment.Center }, _class, _num, _name, _area, _subject },
+            Children = { new Image { Width = 24, Height = 24, Source = icon, VerticalAlignment = VerticalAlignment.Center }, _class, _num, _name, _area },
         };
         var right = new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 7, Margin = new Thickness(7, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
-            Children = { _status, save, close },
+            Children = { openApp, _status, save, close },
         };
         DockPanel.SetDock(left, Dock.Left);
         DockPanel.SetDock(right, Dock.Right);
@@ -89,6 +100,10 @@ public class MemoPopup : Window
             else if (e.Key == Key.S && e.KeyModifiers.HasFlag(KeyModifiers.Control)) { Save(); e.Handled = true; }
         };
     }
+
+    private static Control IconText(string icon, string text, double size = 16, string color = SgbIcon.Accent) =>
+        new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center,
+            Children = { SgbIcon.Make(icon, size, color), new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center } } };
 
     private static AutoCompleteBox MkBox(string ph, double w)
     {
@@ -112,7 +127,7 @@ public class MemoPopup : Window
     public void PopupBar()
     {
         ReloadAll();
-        _memo.Text = ""; _status.Text = "";
+        _memo.Text = ""; _status.Content = null;
         // WorkingArea·Position은 물리 픽셀, Width·Height는 DIP → 화면 배율(예: 125%)로 환산해야 오른쪽이 화면 밖으로 안 나감
         var scr = Screens.Primary;
         var screen = scr?.WorkingArea ?? new PixelRect(0, 0, 1280, 800);
@@ -135,7 +150,6 @@ public class MemoPopup : Window
         _area.SelectedIndex = idx >= 0 ? idx : 0;
         _syncing = false;
         ReloadRecords();
-        SyncSubject();
     }
 
     private AreaSpec Area() => Prompts.Areas[Math.Max(0, _area.SelectedIndex)];
@@ -214,17 +228,6 @@ public class MemoPopup : Window
         finally { _syncing = false; }
     }
 
-    private void SyncSubject()
-    {
-        bool seteuk = Area().Key == "seteuk";
-        _subject.IsVisible = seteuk;
-        if (seteuk)
-        {
-            _subject.Items.Clear();
-            foreach (var s in _settings.Get<string[]>("subjects") ?? Array.Empty<string>()) if (s.Length > 0) _subject.Items.Add(s);
-        }
-    }
-
     // ── 저장 ──
     private void Save()
     {
@@ -232,22 +235,23 @@ public class MemoPopup : Window
         if (t.Length == 0) { _memo.Watermark = "메모를 입력한 뒤 Ctrl+S 하세요"; return; }
         var area = Area();
         string klass = (_class.Text ?? "").Trim(), num = (_num.Text ?? "").Trim(), name = (_name.Text ?? "").Trim();
-        if (klass.Length == 0) { Flash("!", "#dc2626"); _status.Text = "학급?"; return; }
-        if (num.Length == 0 && name.Length == 0) { Flash("!", "#dc2626"); return; }
+        if (klass.Length == 0) { Flash("alert", "#dc2626"); _memo.Watermark = "학급을 먼저 고르세요"; return; }
+        if (num.Length == 0 && name.Length == 0) { Flash("alert", "#dc2626"); _memo.Watermark = "번호나 이름을 고르세요"; return; }
         string result = RosterData.AddMemoToRoster(_dataDir, area.Key, klass, num, name, t);
-        if (result is "" or "no_class") { Flash("!", "#dc2626"); return; }
+        if (result is "" or "no_class") { Flash("alert", "#dc2626"); return; }
         _settings.Set("quicknote_last_class", klass);
         _settings.Set("quicknote_last_area", area.Key);
         _memo.Text = "";
-        Flash(result == "insert" ? "＋" : "✓", "#16a34a");
+        Flash(result == "insert" ? "plus" : "check", "#16a34a");
         Dispatcher.UIThread.Post(() => _memo.Focus());
     }
 
-    private void Flash(string mark, string color)
+    /// <summary>상태 아이콘을 잠깐 보여준다(check=이어붙임, plus=행 추가, alert=오류).</summary>
+    private void Flash(string icon, string color)
     {
-        _status.Foreground = Brush.Parse(color); _status.Text = mark;
+        _status.Content = SgbIcon.Make(icon, 16, color);
         var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1600) };
-        t.Tick += (_, _) => { t.Stop(); _status.Text = ""; };
+        t.Tick += (_, _) => { t.Stop(); _status.Content = null; };
         t.Start();
     }
 
