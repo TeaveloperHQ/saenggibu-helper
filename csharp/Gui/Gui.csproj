@@ -34,7 +34,6 @@
     <MemoRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</MemoRid>
     <MemoRid Condition="'$(MemoRid)' == ''">win-x64</MemoRid>
     <MemoPublishDir>$(MSBuildProjectDirectory)/obj/memo-embed/$(MemoRid)/</MemoPublishDir>
-    <MemoZip>$(MSBuildProjectDirectory)/obj/memo-embed/memo-$(MemoRid).zip</MemoZip>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(EmbedMemo)' == 'true'">
@@ -42,28 +41,18 @@
                      Exclude="../Memo/bin/**;../Memo/obj/**" />
   </ItemGroup>
 
-  <Target Name="PublishMemoForEmbed" Condition="'$(EmbedMemo)' == 'true'" Inputs="@(MemoEmbedInputs)" Outputs="$(MemoZip)">
+  <Target Name="PublishMemoForEmbed" Condition="'$(EmbedMemo)' == 'true'" Inputs="@(MemoEmbedInputs)" Outputs="$(MemoPublishDir)Memo.exe">
     <PropertyGroup>
       <_MemoDotnet>$(DOTNET_HOST_PATH)</_MemoDotnet>
       <_MemoDotnet Condition="'$(_MemoDotnet)' == ''">dotnet</_MemoDotnet>
     </PropertyGroup>
-    <RemoveDir Directories="$(MemoPublishDir)" />
-    <!-- DebugType=none: pdb 없이 exe 하나만 나오게(zip에 pdb가 섞이지 않도록) -->
-    <Exec Command="&quot;$(_MemoDotnet)&quot; publish &quot;$(MSBuildProjectDirectory)/../Memo/Memo.csproj&quot; -c Release -r $(MemoRid) --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -p:DebugSymbols=false -o &quot;$(MemoPublishDir)&quot;" />
-    <!-- NuGet이 같이 복사하는 네이티브 디버그 파일(libSkiaSharp.pdb 80MB 등)은 zip에서 제외 -->
-    <ItemGroup>
-      <_MemoPdb Include="$(MemoPublishDir)**/*.pdb" />
-    </ItemGroup>
-    <Delete Files="@(_MemoPdb)" />
-    <!-- 메인 exe에는 압축해 넣는다(93MB → 약 40MB). 설치할 때 풀어서 쓰므로 메모 실행 속도는 그대로. -->
-    <Delete Files="$(MemoZip)" />
-    <ZipDirectory SourceDirectory="$(MemoPublishDir)" DestinationFile="$(MemoZip)" Overwrite="true" />
+    <Exec Command="&quot;$(_MemoDotnet)&quot; publish &quot;$(MSBuildProjectDirectory)/../Memo/Memo.csproj&quot; -c Release -r $(MemoRid) --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o &quot;$(MemoPublishDir)&quot;" />
   </Target>
 
   <Target Name="EmbedMemoResource" BeforeTargets="PrepareForBuild" DependsOnTargets="PublishMemoForEmbed" Condition="'$(EmbedMemo)' == 'true'">
-    <Error Condition="!Exists('$(MemoZip)')" Text="수업 메모 도구 publish 결과가 없습니다: $(MemoZip)" />
+    <Error Condition="!Exists('$(MemoPublishDir)Memo.exe')" Text="수업 메모 도구 publish 결과가 없습니다: $(MemoPublishDir)Memo.exe" />
     <ItemGroup>
-      <EmbeddedResource Include="$(MemoZip)" LogicalName="memo.zip" WithCulture="false" Type="Non-Resx" />
+      <EmbeddedResource Include="$(MemoPublishDir)Memo.exe" LogicalName="memo.exe" WithCulture="false" Type="Non-Resx" />
     </ItemGroup>
   </Target>
 </Project>

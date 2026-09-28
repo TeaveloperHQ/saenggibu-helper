@@ -145,40 +145,21 @@ public static class Autostart
     public static bool InstallEmbeddedMemo(System.Reflection.Assembly host)
     {
         if (!OperatingSystem.IsWindows()) return false;
-        // 메인 exe 크기를 줄이려고 압축(zip)해 넣는다. 'memo.exe'는 예전 빌드(비압축) 호환용.
-        bool zipped = true;
-        var res = host.GetManifestResourceStream("memo.zip");
-        if (res == null) { zipped = false; res = host.GetManifestResourceStream("memo.exe"); }
+        using var res = host.GetManifestResourceStream("memo.exe");
         if (res == null) return false;
         var exe = MemoInstallPath;
-        using (res)
+        var stampPath = exe + ".build";
+        string build = $"{host.ManifestModule.ModuleVersionId}:{res.Length}";
+        bool same = File.Exists(exe) && File.Exists(stampPath) && File.ReadAllText(stampPath) == build;
+        if (!same)
         {
-            var stampPath = exe + ".build";
-            string build = $"{host.ManifestModule.ModuleVersionId}:{res.Length}";
-            bool same = File.Exists(exe) && File.Exists(stampPath) && File.ReadAllText(stampPath) == build;
-            if (!same)
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
-                foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exe)))
-                    using (p) try { p.Kill(); p.WaitForExit(5000); } catch { }
-                var tmp = exe + ".new";
-                if (zipped)
-                {
-                    using var zip = new System.IO.Compression.ZipArchive(res, System.IO.Compression.ZipArchiveMode.Read);
-                    var entry = zip.Entries.FirstOrDefault(e => e.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
-                    if (entry == null) return false;
-                    using var src = entry.Open();
-                    using var fs = File.Create(tmp);
-                    src.CopyTo(fs);
-                }
-                else
-                {
-                    using var fs = File.Create(tmp);
-                    res.CopyTo(fs);
-                }
-                File.Move(tmp, exe, overwrite: true);
-                File.WriteAllText(stampPath, build);
-            }
+            Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
+            foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(exe)))
+                using (p) try { p.Kill(); p.WaitForExit(5000); } catch { }
+            var tmp = exe + ".new";
+            using (var fs = File.Create(tmp)) res.CopyTo(fs);
+            File.Move(tmp, exe, overwrite: true);
+            File.WriteAllText(stampPath, build);
         }
         CleanupLegacyInstall();
         CreateStartMenuShortcut(exe);
