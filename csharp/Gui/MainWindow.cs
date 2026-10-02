@@ -216,6 +216,19 @@ public class MainWindow : Window
         return await tcs.Task;
     }
 
+    // 엑셀처럼 Alt+Enter = 칸 안에서 줄바꿈. Enter 는 그대로(셀 편집 종료 / 입력칸 줄바꿈).
+    // 터널 단계에서 처리 — 그리드가 Enter 를 먼저 받아 편집을 끝내 버리지 않게.
+    private static void EnableAltEnterNewline(TextBox tb) =>
+        tb.AddHandler(InputElement.KeyDownEvent, (object? _, KeyEventArgs e) =>
+        {
+            if (e.Key != Key.Enter || !e.KeyModifiers.HasFlag(KeyModifiers.Alt)) return;
+            string t = tb.Text ?? "";
+            int caret = Math.Clamp(tb.CaretIndex, 0, t.Length);
+            tb.Text = t[..caret] + "\n" + t[caret..];
+            tb.CaretIndex = caret + 1;
+            e.Handled = true;
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
     // 아이콘 + 텍스트(파이썬 버튼/탭 아이콘과 동일한 SVG 라인 아이콘)
     private static Control IconText(string icon, string text, double size = 16, string color = SgbIcon.Accent) =>
         new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center,
@@ -310,6 +323,7 @@ public class MainWindow : Window
         void RefreshLearn() => learnLabel.Text = _store.CountLearned(Area().Key) > 0 ? $"이 영역 학습 예시 {_store.CountLearned(Area().Key)}건 반영" : "";
 
         var input = new TextBox { Watermark = Area().InputHint, AcceptsReturn = true, Height = 80, TextWrapping = TextWrapping.Wrap };
+        EnableAltEnterNewline(input);   // 엑셀처럼 Alt+Enter 로도 줄바꿈
         var morph = new TextBlock { TextWrapping = TextWrapping.Wrap };
         var morphBox = new Border { Background = Brush.Parse("#fafafa"), BorderBrush = Brush.Parse("#e0e0e0"), BorderThickness = new Thickness(1), Height = 46, Padding = new Thickness(6, 4), Child = new ScrollViewer { Content = morph } };
         var compliance = new TextBlock { Foreground = Brush.Parse("#c62828"), FontSize = 11, TextWrapping = TextWrapping.Wrap };
@@ -353,6 +367,7 @@ public class MainWindow : Window
         string CurClass() => classStrip.SelectedItem as string ?? "";
         bool suppress = false;
         string loadedClass = "";   // 지금 표에 떠 있는 학급 — ＋ 탭을 누른 뒤 강조를 이 탭으로 되돌림
+        Action? refreshSheetEnabled = null;   // 시트 유무에 따라 표·버튼 켜기/끄기(아래에서 레이아웃을 만든 뒤 연결)
         var rows = new ObservableCollection<RowVm>();
         var grid = new DataGrid
         {
@@ -404,12 +419,17 @@ public class MainWindow : Window
                 b.Classes.Add("cellwrap");
                 return b;
             }),
-            CellEditingTemplate = new FuncDataTemplate<RowVm>((_, _) => new TextBox
+            CellEditingTemplate = new FuncDataTemplate<RowVm>((_, _) =>
             {
-                [!TextBox.TextProperty] = new Binding(bindPath) { Mode = BindingMode.TwoWay },
-                Margin = new Thickness(0), Padding = new Thickness(3, 0), MinHeight = 0,
-                BorderThickness = new Thickness(0), VerticalContentAlignment = VerticalAlignment.Center,
-                TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
+                var editor = new TextBox
+                {
+                    [!TextBox.TextProperty] = new Binding(bindPath) { Mode = BindingMode.TwoWay },
+                    Margin = new Thickness(0), Padding = new Thickness(3, 0), MinHeight = 0,
+                    BorderThickness = new Thickness(0), VerticalContentAlignment = VerticalAlignment.Center,
+                    TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
+                };
+                EnableAltEnterNewline(editor);   // 엑셀처럼 Alt+Enter = 칸 안에서 줄바꿈
+                return editor;
             }),
         };
         // 파이썬 class_tab.py 구조: 학번·이름 = 고정(FIXED=2), 그 뒤 '내용' 열들(첫 내용 열 = Content)
@@ -575,7 +595,8 @@ public class MainWindow : Window
                     rows.Add(vm);
                 }
             }
-            for (int i = rows.Count; i < 50; i++) rows.Add(new RowVm());   // 기본 50행(학급 25명+ 여유)
+            if (loadedClass.Length > 0)
+                for (int i = rows.Count; i < 50; i++) rows.Add(new RowVm());   // 기본 50행(학급 25명+ 여유). 시트가 없으면 빈 표도 만들지 않음
             grid.Columns[0].Header = numLabel; grid.Columns[1].Header = nameLabel; grid.Columns[2].Header = contentLabel;
             grid.Columns[0].MinWidth = HdrMin(numLabel); grid.Columns[1].MinWidth = HdrMin(nameLabel); grid.Columns[2].MinWidth = HdrMin(contentLabel);
             RebuildExtraColumns();
@@ -598,6 +619,7 @@ public class MainWindow : Window
             }
             UpdateHideMarkers();
             grid.ItemsSource = null; grid.ItemsSource = rows;   // 행이 복원 전에 먼저 생성됨 → LoadingRow 재실행으로 저장된 행 높이 적용
+            refreshSheetEnabled?.Invoke();
         }
         void SaveView()   // 보기 상태를 roster JSON에 저장(세션 넘어 유지)
         {
@@ -693,7 +715,7 @@ public class MainWindow : Window
                 status.Text = $"{Math.Min(outv.Count, selRows.Count)}개 채움. '저장'하면 학습에 반영됩니다.";
             }
             catch (Exception ex) { status.Text = "오류: " + ex.Message; }
-            finally { genBtn.IsEnabled = true; }
+            finally { genBtn.IsEnabled = true; refreshSheetEnabled?.Invoke(); }
         };
 
         var addRow = new Button { Content = "행 추가" }; addRow.Click += (_, _) => rows.Add(new RowVm());
@@ -1193,6 +1215,18 @@ public class MainWindow : Window
         gridHost.Children.Add(grid);
         gridHost.Children.Add(cornerBox);
         sheet.Children.Add(MRow(4, gridHost));
+
+        // 시트가 없으면(＋ 로 만들기 전) 표와 시트 버튼을 모두 끈다 — 예전: 빈 표에 입력·엑셀 불러오기가 돼 저장에서 막혔음
+        refreshSheetEnabled = () =>
+        {
+            bool has = CurClass() is { Length: > 0 } c && c != "＋";
+            toolbar.IsEnabled = has;
+            gridHost.IsEnabled = has;
+            genBtn.IsEnabled = has && genBtn.IsEnabled;
+            cornerBox.IsVisible = has;
+            if (!has) sheetMsg.Text = "시트가 없습니다 — 학급 탭의 ＋ 를 눌러 시트를 만들면 표와 버튼이 켜집니다.";
+        };
+        refreshSheetEnabled();
 
         var root = new DockPanel { Margin = new Thickness(16, 12, 16, 12) };
         root.Children.Add(Docked(topPanel, Dock.Top));
