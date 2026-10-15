@@ -46,7 +46,9 @@
       <_MemoDotnet>$(DOTNET_HOST_PATH)</_MemoDotnet>
       <_MemoDotnet Condition="'$(_MemoDotnet)' == ''">dotnet</_MemoDotnet>
     </PropertyGroup>
-    <Exec Command="&quot;$(_MemoDotnet)&quot; publish &quot;$(MSBuildProjectDirectory)/../Memo/Memo.csproj&quot; -c Release -r $(MemoRid) --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o &quot;$(MemoPublishDir)&quot;" />
+    <!-- W^X 끔: 포털 빌드 컨테이너의 파일 크기 제한(ulimit fsize 2GB)에서 중첩 dotnet 이 시작하자마자
+         'File size limit exceeded' 로 죽는다(런타임 W^X 이중 매핑). 빌드 도구 프로세스에만 적용, 앱과 무관. -->
+    <Exec Command="&quot;$(_MemoDotnet)&quot; publish &quot;$(MSBuildProjectDirectory)/../Memo/Memo.csproj&quot; -c Release -r $(MemoRid) --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o &quot;$(MemoPublishDir)&quot;" EnvironmentVariables="DOTNET_EnableWriteXorExecute=0" />
   </Target>
 
   <Target Name="EmbedMemoResource" BeforeTargets="PrepareForBuild" DependsOnTargets="PublishMemoForEmbed" Condition="'$(EmbedMemo)' == 'true'">
