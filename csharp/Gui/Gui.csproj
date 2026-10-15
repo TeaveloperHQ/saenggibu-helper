@@ -57,4 +57,15 @@
       <EmbeddedResource Include="$(MemoPublishDir)Memo.exe" LogicalName="memo.exe" WithCulture="false" Type="Non-Resx" />
     </ItemGroup>
   </Target>
+
+  <!-- Windows 전용 배포: LLamaSharp.Backend.Cpu 가 모든 OS 네이티브(runtimes/linux-*, osx-*, win-arm64 …, ~80MB)를
+       통째로 복사하므로, publish 대상 RID(win-x64) 가 아닌 runtimes/* 는 단일 exe 에 넣지 않는다.
+       (패키지 경로가 'runtimes\\win-x64/…' 처럼 구분자가 섞여 있어 정규식으로 판정) -->
+  <Target Name="DropOtherRidNatives" AfterTargets="ComputeResolvedFilesToPublishList" Condition="$(RuntimeIdentifier.StartsWith('win'))">
+    <ItemGroup>
+      <_OtherRidNative Include="@(ResolvedFileToPublish)"
+                       Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(RelativePath)', '^runtimes[\\/]+')) And !$([System.Text.RegularExpressions.Regex]::IsMatch('%(RelativePath)', '^runtimes[\\/]+$(RuntimeIdentifier)[\\/]'))" />
+      <ResolvedFileToPublish Remove="@(_OtherRidNative)" />
+    </ItemGroup>
+  </Target>
 </Project>
