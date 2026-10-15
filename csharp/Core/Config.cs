@@ -16,20 +16,21 @@ public static class Config
         ?? "https://sgb50013120.blob.core.windows.net/dist/saenggibu-natural-1849-dpo-q4_k_m.gguf?se=2035-12-31T23%3A59%3A59Z&sp=r&spr=https&sv=2026-04-06&sr=b&sig=bQG6LO1B%2BHFPgLsUh5hw3%2F8ebw7wDzNKiIixFz%2Ftw8I%3D";
     public const long ModelApproxBytes = 4_683_073_472L;
 
-    // Kiwi 형태소 모델(핀 고정 0.23.0) — 우리 Azure Blob(SAS, 읽기전용). exe 옆/데이터 폴더에 없으면 앱이 받아 kiwi_model/ 로 푼다.
+    // Kiwi 형태소 모델(핀 고정 0.24.0 = Apache 2.0. 0.23.2 이하는 LGPL이라 쓰지 않는다)
+    // — 우리 Azure Blob(SAS, 읽기전용). exe 옆/데이터 폴더에 없으면 앱이 받아 kiwi_model/ 로 푼다.
     // (SGB_KIWI_MODEL_URL 로 오버라이드 가능 — 배포 시 URL 교체용)
     public const string KiwiModelDir = "kiwi_model";
     public static readonly string KiwiModelUrl = Environment.GetEnvironmentVariable("SGB_KIWI_MODEL_URL")
-        ?? "https://sgb50013120.blob.core.windows.net/dist/kiwi_model_0.23.0.zip?se=2035-12-31T23%3A59%3A59Z&sp=r&spr=https&sv=2026-04-06&sr=b&sig=ALXQlYzyFACdQ8k55pS6g3SU4xppOgHVDQkO4g%2FFu6A%3D";
-    public const long KiwiModelApproxBytes = 105_000_000L;
+        ?? "https://sgb50013120.blob.core.windows.net/dist/kiwi_model_0.24.0_cong_base.zip?se=2035-12-31T23%3A59%3A59Z&sp=r&spr=https&sv=2026-04-06&sr=b&sig=Uh%2FU2tgWCcVKGr38EOYYP1JscFAGvW3N8Sn6mTvcv6c%3D";
+    public const long KiwiModelApproxBytes = 88_000_000L;
     public const string KiwiMorphFile = "sj.morph";   // 이 파일이 빠진 묶음이면 kiwi_init 실패 → 완비 판정 기준
 
     // Kiwi 네이티브(kiwi.dll) — exe 하나만 받는 배포(포털)에는 동봉되지 않으므로 없으면 받아서 데이터 폴더에 둔다.
     // (SGB_KIWI_DLL_URL 로 오버라이드 — 우리 Blob으로 옮길 때 URL만 교체)
     public const string KiwiDllName = "kiwi.dll";
     public static readonly string KiwiDllUrl = Environment.GetEnvironmentVariable("SGB_KIWI_DLL_URL")
-        ?? "https://github.com/bab2min/Kiwi/releases/download/v0.23.0/kiwi_win_x64_v0.23.0.zip";
-    public const long KiwiDllApproxBytes = 14_000_000L;
+        ?? "https://sgb50013120.blob.core.windows.net/dist/kiwi_win_x64_v0.24.0.zip?se=2035-12-31T23%3A59%3A59Z&sp=r&spr=https&sv=2026-04-06&sr=b&sig=4JHKzjctznEnhB7cWy0PXgKwtfJwrSfeN%2FfTQoV2utQ%3D";
+    public const long KiwiDllApproxBytes = 38_000_000L;
 
     // LLM 파라미터 (config.py 와 동일 기본값)
     public static readonly int NCtx = EnvInt("SGB_N_CTX", 4096);

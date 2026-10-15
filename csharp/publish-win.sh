@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 OUT="${1:-publish/win-x64}"
-KIWI_VER="0.23.0"
+KIWI_VER="0.24.0"
 FLAGS=(-c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$OUT")
 
 # 수업 메모 도구는 메인 exe 안에 동봉된다(Gui.csproj EmbedMemo) — 메인 앱 첫 실행 때 %LOCALAPPDATA%\SaenggibuHelper\수업메모.exe 로 꺼냄

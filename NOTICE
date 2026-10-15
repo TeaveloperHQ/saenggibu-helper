@@ -1,0 +1,29 @@
+생기부 도우미 — 제3자 구성요소 고지
+Third-party notices for 생기부 도우미 (saenggibu-helper)
+
+이 앱은 MIT 라이선스로 배포됩니다(LICENSE 참고). 아래 구성요소를 함께 사용하거나 내려받아 씁니다.
+
+--------------------------------------------------------------------------------
+Kiwi (Korean Intelligent Word Identifier) — 형태소 분석
+--------------------------------------------------------------------------------
+Copyright 2017-2026 Minchul Lee and the Kiwi contributors
+https://github.com/bab2min/Kiwi
+Apache License, Version 2.0 — https://www.apache.org/licenses/LICENSE-2.0
+
+사용 버전: 0.24.0 (코드·모델 모두 Apache 2.0).
+  * 0.23.2 이하 버전은 LGPL로 배포되므로 이 앱에서는 쓰지 않습니다.
+
+앱은 네이티브 라이브러리(kiwi.dll)와 학습된 모델 파일을 앱 서버에서 내려받아
+사용자 PC의 데이터 폴더에 둡니다. 원본 배포물은 위 저장소의 릴리스와 동일합니다.
+
+모델 학습에는 국립국어원의 21세기 세종계획 말뭉치와 모두의 말뭉치가 쓰였습니다.
+모델에는 원본 말뭉치 텍스트가 포함되어 있지 않으며, 복원할 수도 없습니다.
+자세한 내용은 Kiwi 저장소의 NOTICE 파일을 참고하세요.
+
+--------------------------------------------------------------------------------
+그 밖의 구성요소
+--------------------------------------------------------------------------------
+Avalonia UI — MIT — https://github.com/AvaloniaUI/Avalonia
+LLamaSharp / llama.cpp — MIT — https://github.com/SciSharp/LLamaSharp
+ClosedXML — MIT — https://github.com/ClosedXML/ClosedXML
+Microsoft.Data.Sqlite / .NET — MIT — https://github.com/dotnet
