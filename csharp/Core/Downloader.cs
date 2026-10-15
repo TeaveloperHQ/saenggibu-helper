@@ -41,6 +41,44 @@ public static class Downloader
         finally { try { File.Delete(tmp); } catch { } }
     }
 
+    /// <summary>zip 안의 파일 하나만 꺼내 destFile 로 저장(이미 있으면 그대로).
+    /// 형태소 네이티브(kiwi.dll)처럼 배포 zip 안에 폴더 구조가 섞여 있어도 이름으로 찾아 꺼낸다.</summary>
+    public static async Task DownloadZipEntryAsync(string url, string entryFileName, string destFile,
+        long approxBytes, ProgressCb? progress = null, HttpClient? client = null)
+    {
+        if (File.Exists(destFile)) return;
+        Directory.CreateDirectory(Path.GetDirectoryName(destFile)!);
+        string tmp = Path.Combine(Path.GetTempPath(), "sgb_" + Path.GetRandomFileName() + ".zip");
+        var http = client ?? new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
+        try
+        {
+            using (var resp = await http.SendAsync(new HttpRequestMessage(HttpMethod.Get, url), HttpCompletionOption.ResponseHeadersRead))
+            {
+                resp.EnsureSuccessStatusCode();
+                long total = resp.Content.Headers.ContentLength ?? approxBytes;
+                long done = 0;
+                await using var src = await resp.Content.ReadAsStreamAsync();
+                await using var f = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None);
+                var buf = new byte[256 * 1024];
+                int read;
+                while ((read = await src.ReadAsync(buf)) > 0)
+                {
+                    await f.WriteAsync(buf.AsMemory(0, read));
+                    done += read; progress?.Invoke(done, total);
+                }
+            }
+            using var zip = System.IO.Compression.ZipFile.OpenRead(tmp);
+            var entry = zip.Entries.FirstOrDefault(e => string.Equals(e.Name, entryFileName, StringComparison.OrdinalIgnoreCase))
+                        ?? throw new FileNotFoundException($"{entryFileName} 를 내려받은 zip에서 찾지 못했습니다.");
+            string staging = destFile + ".new";
+            await using (var src = entry.Open())
+            await using (var dst = File.Create(staging))
+                await src.CopyToAsync(dst);
+            File.Move(staging, destFile, overwrite: true);
+        }
+        finally { try { File.Delete(tmp); } catch { } }
+    }
+
     public static bool ModelExists(string? path) =>
         path != null && File.Exists(path) && new FileInfo(path).Length > 1_000_000;
 

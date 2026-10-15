@@ -459,7 +459,7 @@ public class MainWindow : Window
         catch (Exception cex) { status.Text = "학습 데이터 정리 실패: " + cex.Message; }
         // 키워드 빈 학습 예시 → 문장 속 명사로 채움(형태소 모델이 이미 있을 때만 · 분석은 백그라운드, DB 기록은 UI 스레드)
         var needKw = _store.ExamplesMissingKeywords();
-        if (needKw.Count > 0 && File.Exists(Path.Combine(KiwiModelPath(), "cong.mdl")))
+        if (needKw.Count > 0 && KiwiModelReady(KiwiModelPath()))
             _ = Task.Run(() =>
             {
                 var filled = needKw.Select(e => (e.id, kw: LearnKeywords(e.text))).Where(x => x.kw.Length > 0).ToList();
@@ -659,7 +659,17 @@ public class MainWindow : Window
         };
         classStrip.DoubleTapped += (_, _) => { var cur = CurClass(); if (cur.Length > 0 && cur != "＋") ShowPrompt(classStrip, cur, "학급 이름 변경", nn => { if (RosterData.RenameClass(_dataDir, Area().Key, cur, nn)) { ReloadSheet(); classStrip.SelectedItem = nn; } }); };
 
-        areaStrip.SelectionChanged += (_, _) => { subject.IsVisible = Area().SubjectField; input.Watermark = Area().InputHint; RefreshLearn(); classStrip.SelectedIndex = -1; ReloadSheet(); };
+        // 입력칸·과목은 영역 탭마다 따로 보관(예전: 모든 영역이 한 칸을 공유해 탭을 옮기면 남의 글이 보였음)
+        var areaInputs = new Dictionary<string, (string input, string subject)>();
+        string prevAreaKey = Area().Key;
+        areaStrip.SelectionChanged += (_, _) =>
+        {
+            areaInputs[prevAreaKey] = (input.Text ?? "", subject.Text ?? "");
+            prevAreaKey = Area().Key;
+            var keep = areaInputs.TryGetValue(prevAreaKey, out var v) ? v : (input: "", subject: "");
+            input.Text = keep.input; subject.Text = keep.subject;
+            subject.IsVisible = Area().SubjectField; input.Watermark = Area().InputHint; RefreshLearn(); classStrip.SelectedIndex = -1; ReloadSheet();
+        };
         subject.IsVisible = Area().SubjectField;
         RefreshLearn(); ReloadSheet();
 
@@ -1574,25 +1584,40 @@ public class MainWindow : Window
     // 배포: exe 옆(ProcessPath 폴더)에서 동봉 파일을 찾는다. single-file 배포에서도 실제 exe 위치.
     private static string AppDir => Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
 
+    // Kiwi 모델이 다 갖춰졌는지 — cong.mdl(언어 모델) + sj.morph(형태소 사전) 둘 다 있어야 kiwi_init 이 뜬다.
+    // (예전: cong.mdl 만 보고 판단 → sj.morph 빠진 묶음을 받아 두고도 '있음'으로 쳐서 분석이 계속 실패)
+    private static bool KiwiModelReady(string dir) =>
+        File.Exists(Path.Combine(dir, "cong.mdl")) && File.Exists(Path.Combine(dir, Config.KiwiMorphFile));
+
     // Kiwi 모델: env → 데이터 폴더(다운로드) → exe 옆(동봉). 없으면 데이터 폴더로 받는다.
     private string KiwiModelPath()
     {
         var env = Environment.GetEnvironmentVariable("SGB_KIWI_MODEL");
-        if (!string.IsNullOrEmpty(env) && File.Exists(Path.Combine(env, "cong.mdl"))) return env;
+        if (!string.IsNullOrEmpty(env) && KiwiModelReady(env)) return env;
         var data = Path.Combine(_dataDir, Config.KiwiModelDir);
-        if (File.Exists(Path.Combine(data, "cong.mdl"))) return data;
+        if (KiwiModelReady(data)) return data;
         var bundled = Path.Combine(AppDir, Config.KiwiModelDir);
-        if (File.Exists(Path.Combine(bundled, "cong.mdl"))) return bundled;
+        if (KiwiModelReady(bundled)) return bundled;
         return data;   // 없음 → 여기로 다운로드
     }
     private void EnsureKiwi()
     {
         if (_kiwi != null) return;
+        // 형태소 네이티브(kiwi.dll): exe 하나만 받는 배포(포털)에는 없으므로 데이터 폴더로 받아 두고 거기서도 찾게 한다
+        KiwiNative.ExtraNativeDir = _dataDir;
+        if (OperatingSystem.IsWindows()
+            && !File.Exists(Path.Combine(AppDir, Config.KiwiDllName))
+            && !File.Exists(Path.Combine(_dataDir, Config.KiwiDllName)))
+        {
+            Dispatcher.UIThread.Post(() => { if (_learnStatus != null) _learnStatus.Text = "형태소 분석기 내려받는 중…"; });
+            Downloader.DownloadZipEntryAsync(Config.KiwiDllUrl, Config.KiwiDllName,
+                Path.Combine(_dataDir, Config.KiwiDllName), Config.KiwiDllApproxBytes).GetAwaiter().GetResult();
+        }
         var path = KiwiModelPath();
-        if (!File.Exists(Path.Combine(path, "cong.mdl")))   // 없으면 우리 저장소에서 받아 해제(형태소 모델 85MB)
+        if (!KiwiModelReady(path))   // 없거나 불완전하면 우리 저장소에서 받아 해제(형태소 모델 약 100MB)
         {
             Dispatcher.UIThread.Post(() => { if (_learnStatus != null) _learnStatus.Text = "형태소 모델(85MB) 내려받는 중…"; });
-            Downloader.DownloadZipToDirAsync(Config.KiwiModelUrl, path, "cong.mdl", Config.KiwiModelApproxBytes).GetAwaiter().GetResult();
+            Downloader.DownloadZipToDirAsync(Config.KiwiModelUrl, path, Config.KiwiMorphFile, Config.KiwiModelApproxBytes).GetAwaiter().GetResult();
             Dispatcher.UIThread.Post(() => { if (_learnStatus != null) _learnStatus.Text = $"학습 예시: 총 {_store.CountLearned()}건"; });
         }
         _kiwi = new KiwiNative(path);

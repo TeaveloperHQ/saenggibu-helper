@@ -13,14 +13,21 @@ public sealed class KiwiNative : IKiwi, IDisposable
 
     // 배포(exe 옆 kiwi.dll) + 개발(LD_LIBRARY_PATH) 모두 지원 — 네이티브 lib을 exe 폴더에서 우선 로드.
     static KiwiNative() => NativeLibrary.SetDllImportResolver(typeof(KiwiNative).Assembly, ResolveNative);
+    /// <summary>exe 옆 말고 추가로 찾을 폴더(보통 데이터 폴더) — exe 하나만 받는 배포에선 여기로 받아 둔다.</summary>
+    public static string? ExtraNativeDir { get; set; }
+
     private static IntPtr ResolveNative(string name, System.Reflection.Assembly asm, DllImportSearchPath? path)
     {
         if (name != Lib) return IntPtr.Zero;
-        var dir = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
-        foreach (var f in new[] { "kiwi.dll", "libkiwi.so", "libkiwi.dylib", "libkiwi.so.0" })
+        var dirs = new[] { Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory, ExtraNativeDir };
+        foreach (var dir in dirs)
         {
-            var p = Path.Combine(dir, f);
-            if (File.Exists(p) && NativeLibrary.TryLoad(p, out var h)) return h;
+            if (string.IsNullOrEmpty(dir)) continue;
+            foreach (var f in new[] { "kiwi.dll", "libkiwi.so", "libkiwi.dylib", "libkiwi.so.0" })
+            {
+                var p = Path.Combine(dir, f);
+                if (File.Exists(p) && NativeLibrary.TryLoad(p, out var h)) return h;
+            }
         }
         return IntPtr.Zero;   // 폴백: 기본 검색(PATH/LD_LIBRARY_PATH)
     }
