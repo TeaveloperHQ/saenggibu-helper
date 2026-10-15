@@ -1,0 +1,10 @@
+<Project>
+  <!-- 포털 빌드 컨테이너는 HOME=/tmp 이고 /tmp 가 1GB tmpfs 다. NuGet 패키지(풀린 합계 ~1.6GB, Gui+동봉 Memo 두 번 복원)가
+       기본 위치(/tmp/dotnet-home/.nuget/packages)에 풀리면 'No space left on device' 로 복원이 실패한다.
+       HOME 이 /tmp 아래인 빌드에서만 패키지를 작업 트리(디스크)로 옮기고 HTTP 캐시(nupkg 사본)를 끈다.
+       로컬 개발 빌드는 그대로(~/.nuget/packages 공유). -->
+  <PropertyGroup Condition="'$(OS)' != 'Windows_NT' And $([System.String]::Copy('$(HOME)').StartsWith('/tmp'))">
+    <RestorePackagesPath>$(MSBuildThisFileDirectory).nuget/packages/</RestorePackagesPath>
+    <RestoreNoCache>true</RestoreNoCache>
+  </PropertyGroup>
+</Project>

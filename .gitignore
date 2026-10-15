@@ -54,3 +54,4 @@ Thumbs.db
 csharp/native/
 *.so
 *.so.*
+/csharp/.nuget/
