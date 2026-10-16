@@ -368,7 +368,16 @@ public class MainWindow : Window
         bool suppress = false;
         string loadedClass = "";   // 지금 표에 떠 있는 학급 — ＋ 탭을 누른 뒤 강조를 이 탭으로 되돌림
         Action? refreshSheetEnabled = null;   // 시트 유무에 따라 표·버튼 켜기/끄기(아래에서 레이아웃을 만든 뒤 연결)
+        bool generating = false;              // 생성 중에만 '선택한 행 채우기'를 잠근다(버튼 상태를 따로 두지 않으면 한 번 꺼진 뒤 다시 안 켜짐)
         var rows = new ObservableCollection<RowVm>();
+        // 저장 전 바뀐 행 — 빨간 글씨로 표시하고, 원하면 그 행만 모아 본다. 저장하면 둘 다 해제.
+        var dirtyRows = new HashSet<RowVm>();                       // '수정한 행만 보기'용
+        var dirtyCells = new HashSet<(RowVm row, string path)>();      // 빨간 글씨로 표시할 칸
+        var baseText = new Dictionary<(RowVm row, string path), string>();   // 그 칸의 저장 당시 내용(여기서 달라진 뒷부분만 빨강)
+        static string ValueOf(RowVm r, string path) => path == "Num" ? r.Num : path == "Name" ? r.Name : path == "Content" ? r.Content
+            : (path.StartsWith('[') && path.EndsWith(']') ? r[path[1..^1]] : "");
+        bool onlyDirty = false;
+        Action? syncDirtyView = null;   // '수정한 행만' 버튼 상태 갱신(툴바를 만든 뒤 연결)
         var grid = new DataGrid
         {
             ItemsSource = rows, AutoGenerateColumns = false, IsReadOnly = false,
@@ -406,15 +415,25 @@ public class MainWindow : Window
         DataGridColumn Col(string header, string bindPath, DataGridLength w, bool wrap = false) => new DataGridTemplateColumn
         {
             Header = header, Width = w, CanUserResize = true, MinWidth = HdrMin(header),
-            CellTemplate = new FuncDataTemplate<RowVm>((_, _) =>
+            CellTemplate = new FuncDataTemplate<RowVm>((vm, _) =>
             {
                 var tb = new TextBlock
                 {
-                    [!TextBlock.TextProperty] = new Binding(bindPath),
                     Margin = new Thickness(4, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center,
                     TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
                     TextTrimming = wrap ? TextTrimming.None : TextTrimming.CharacterEllipsis,
                 };
+                // 저장 전 바뀐 칸은 '새로 붙은 부분'만 빨간 글씨 — 원래 있던 문장은 검은색 그대로라 읽기 쉽다.
+                // (바뀐 칸만 이렇게 직접 그리고, 나머지는 평소대로 바인딩)
+                if (vm != null && baseText.TryGetValue((vm, bindPath), out var was))
+                {
+                    string cur = ValueOf(vm, bindPath);
+                    int keep = 0;
+                    while (keep < was.Length && keep < cur.Length && was[keep] == cur[keep]) keep++;
+                    if (keep > 0) tb.Inlines!.Add(new Run(cur[..keep]));
+                    if (keep < cur.Length) tb.Inlines!.Add(new Run(cur[keep..]) { Foreground = Brush.Parse("#c62828") });
+                }
+                else tb[!TextBlock.TextProperty] = new Binding(bindPath);
                 var b = new Border { Child = tb, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };   // 숨김 경계 강조선용 래퍼
                 b.Classes.Add("cellwrap");
                 return b;
@@ -499,7 +518,11 @@ public class MainWindow : Window
         };
         grid.CellEditEnded += (_, e) =>
         {
-            if (editSnap != null && editRow != null && GetCell(editRow, editCol) != editOld) { Push(undo, editSnap); redo.Clear(); }
+            if (editSnap != null && editRow != null && GetCell(editRow, editCol) != editOld)
+            {
+                Push(undo, editSnap); redo.Clear();
+                MarkDirty(editRow, editCol, editOld); Dispatcher.UIThread.Post(Bind);   // 바뀐 부분 빨간 표시
+            }
             editSnap = null; editRow = null;
         };
         // 창 전체(버블) — 셀 편집 중·입력칸의 TextBox는 자체 되돌리기로 Handled 처리하므로 여기로 안 옴
@@ -580,6 +603,7 @@ public class MainWindow : Window
         void LoadRows()
         {
             rows.Clear(); extraCols.Clear(); numLabel = "학번"; nameLabel = "이름"; contentLabel = "내용";
+            dirtyRows.Clear(); dirtyCells.Clear(); baseText.Clear(); onlyDirty = false;   // 다른 시트 → 빨간 표시·'수정한 행만' 해제
             undo.Clear(); redo.Clear();   // 다른 시트로 전환 → 되돌리기 기록 초기화
             ShowTabMsg();                 // 메시지도 이 탭 것으로
             contentFill = true;           // 기본 = 내용 열 채우기(저장된 보기가 있으면 아래에서 덮어씀) — 이전 시트 설정이 남지 않게
@@ -618,7 +642,7 @@ public class MainWindow : Window
                 foreach (var kv in view.rowHeights) if (kv.Key < rows.Count) rowHeights[rows[kv.Key]] = kv.Value;
             }
             UpdateHideMarkers();
-            grid.ItemsSource = null; grid.ItemsSource = rows;   // 행이 복원 전에 먼저 생성됨 → LoadingRow 재실행으로 저장된 행 높이 적용
+            Bind();   // 행이 복원 전에 먼저 생성됨 → LoadingRow 재실행으로 저장된 행 높이 적용
             refreshSheetEnabled?.Invoke();
         }
         void SaveView()   // 보기 상태를 roster JSON에 저장(세션 넘어 유지)
@@ -701,7 +725,7 @@ public class MainWindow : Window
             string toneT = tone.SelectedItem as string ?? ""; if (toneT == "기본") toneT = "";
             string lenT = length.SelectedIndex == 0 ? "" : (length.SelectedItem as string ?? "");
             var terms = _glossary.AllTerms();
-            genBtn.IsEnabled = false; status.Text = $"{selRows.Count}개 생성 중… (최초 로딩 수십 초)";
+            generating = true; refreshSheetEnabled?.Invoke(); status.Text = $"{selRows.Count}개 생성 중… (최초 로딩 수십 초)";
             try
             {
                 var outv = await Task.Run(() =>
@@ -720,12 +744,13 @@ public class MainWindow : Window
                     string prev = GetCell(selRows[i], tgt).Trim(), nw = outv[i].Trim();
                     SetCell(selRows[i], tgt, prev.Length > 0 ? $"{prev} {nw}" : nw);
                 }
-                grid.ItemsSource = null; grid.ItemsSource = rows;   // 표 갱신
+                onlyDirty = true;   // 채운 행만 모아 보기(저장하면 해제)
+                Bind();
                 RememberSubject(subj);
                 status.Text = $"{Math.Min(outv.Count, selRows.Count)}개 채움. '저장'하면 학습에 반영됩니다.";
             }
             catch (Exception ex) { status.Text = "오류: " + ex.Message; }
-            finally { genBtn.IsEnabled = true; refreshSheetEnabled?.Invoke(); }
+            finally { generating = false; refreshSheetEnabled?.Invoke(); }
         };
 
         var addRow = new Button { Content = "행 추가" }; addRow.Click += (_, _) => rows.Add(new RowVm());
@@ -737,6 +762,7 @@ public class MainWindow : Window
             RosterData.WriteRowsExtended(_dataDir, Area().Key, k, numLabel, nameLabel, contentLabel, extraCols,
                 rows.Select(r => (r.Num, r.Name, r.Content, (IReadOnlyList<string>)extraCols.Select(c => r[c.id]).ToList())));
             SaveView();   // 열 고정·숨김·너비·행높이도 함께 저장
+            dirtyRows.Clear(); dirtyCells.Clear(); baseText.Clear(); onlyDirty = false; Bind();   // 저장했으니 빨간 표시·'수정한 행만' 해제
             sheetMsg.Text = $"'{k}' 저장했습니다. 학습은 학습 모드에서 '입력 내용 스캔해 학습'을 누르세요.";
         };
         var importX = new Button { Content = IconText("import", "엑셀 불러오기") };
@@ -796,7 +822,7 @@ public class MainWindow : Window
                     if (i == 2) contentFill = true;   // 내용 열은 FitContent가 남는 폭 채움
                     else grid.Columns[i].Width = new DataGridLength(natural);
                 }
-                grid.ItemsSource = null; grid.ItemsSource = rows;
+                Bind();
                 RefreshColCombo(true);   // 새 시트 → 생성 대상 열 자동 선택 다시
                 sheetMsg.Text = $"엑셀 불러옴 — {xrows.Count}행 · {keep.Count}열(이름 없는 열 제외).";
             }
@@ -821,8 +847,25 @@ public class MainWindow : Window
 
         // ── 우클릭 메뉴(파이썬 class_tab.py 기준): 열머리글 / 행머리글 / 셀 로 분리 ──
         string GetCell(RowVm r, int di) => di == 0 ? r.Num : di == 1 ? r.Name : di == 2 ? r.Content : ((di - CoreCols) is var e2 && e2 >= 0 && e2 < extraCols.Count ? r[extraCols[e2].id] : "");
-        void SetCell(RowVm r, int di, string v) { switch (di) { case 0: r.Num = v; break; case 1: r.Name = v; break; case 2: r.Content = v; break; default: int ei = di - CoreCols; if (ei >= 0 && ei < extraCols.Count) r[extraCols[ei].id] = v; break; } }
-        void Refresh() { grid.ItemsSource = null; grid.ItemsSource = rows; }   // 행 번호 재정렬 + 표 갱신
+        string PathOf(int di) => di == 0 ? "Num" : di == 1 ? "Name" : di == 2 ? "Content"
+            : ((di - CoreCols) is var ep && ep >= 0 && ep < extraCols.Count ? "[" + extraCols[ep].id + "]" : "");
+        void MarkDirty(RowVm r, int di, string? oldText = null)
+        {
+            dirtyRows.Add(r);
+            string p = PathOf(di);
+            if (p.Length == 0) return;
+            dirtyCells.Add((r, p));
+            if (!baseText.ContainsKey((r, p))) baseText[(r, p)] = oldText ?? GetCell(r, di);
+        }
+        void SetCell(RowVm r, int di, string v) { MarkDirty(r, di); switch (di) { case 0: r.Num = v; break; case 1: r.Name = v; break; case 2: r.Content = v; break; default: int ei = di - CoreCols; if (ei >= 0 && ei < extraCols.Count) r[extraCols[ei].id] = v; break; } }
+        // 표에 묶을 목록 — '수정한 행만' 이면 바뀐 행만 보여 준다(행 객체는 그대로라 저장·되돌리기는 전체 기준)
+        void Bind()
+        {
+            grid.ItemsSource = null;
+            grid.ItemsSource = onlyDirty ? new ObservableCollection<RowVm>(rows.Where(dirtyRows.Contains)) : rows;
+            syncDirtyView?.Invoke();
+        }
+        void Refresh() { Bind(); }   // 행 번호 재정렬 + 표 갱신
         void RefreshKeep()   // Refresh + 선택 행·현재 열 복원(ItemsSource 재설정으로 선택이 1열로 튀던 문제)
         {
             var sel = grid.SelectedItems.Cast<RowVm>().ToList();
@@ -1107,7 +1150,7 @@ public class MainWindow : Window
                     string cur = GetCell(r, di); int c = CountOccur(cur, find);
                     if (c > 0) { SetCell(r, di, cur.Replace(find, repl)); n += c; }
                 }
-            if (n > 0) { grid.ItemsSource = null; grid.ItemsSource = rows; }
+            if (n > 0) Bind();
             return n;
         }
         int ReplaceAllClasses(string find, string repl)   // 전체 학급(디스크) — 현재 시트 저장 후 일괄
@@ -1208,7 +1251,17 @@ public class MainWindow : Window
 
         // 시트 영역(파이썬 순서): 라벨 → 툴바(대상열 | 찾기·맞춤법·엑셀·저장) → 안내 → 학급 탭(＋ · 전체화면) → 그리드
         var sheetLabel = new TextBlock { Text = "학급 표 (학급 탭별 · 선택한 행에 채워짐 · 엑셀 가져오기/내보내기)", FontWeight = FontWeight.SemiBold, Foreground = Brush.Parse("#444"), Margin = new Thickness(0, 12, 0, 6), TextWrapping = TextWrapping.Wrap };
-        var toolbar = Bar(HRow(new TextBlock { Text = "생성 대상 열", VerticalAlignment = VerticalAlignment.Center }, colCombo), HRow(findBtn, spellBtn, importX, exportX, saveSheet));
+        // 저장 전 바뀐 행만 모아 보기 — AI 로 채우면 저절로 켜지고, 저장하면 꺼진다
+        var dirtyBtn = new Button();
+        dirtyBtn.Click += (_, _) => { onlyDirty = !onlyDirty; Bind(); };
+        syncDirtyView = () =>
+        {
+            dirtyBtn.IsEnabled = dirtyRows.Count > 0;
+            dirtyBtn.Content = onlyDirty ? IconText("maximize", "전체 행 보기", 15)
+                                         : IconText("edit", $"수정한 행만 ({dirtyRows.Count})", 15);
+        };
+        syncDirtyView();
+        var toolbar = Bar(HRow(new TextBlock { Text = "생성 대상 열", VerticalAlignment = VerticalAlignment.Center }, colCombo), HRow(dirtyBtn, findBtn, spellBtn, importX, exportX, saveSheet));
         // 학급 탭: 가로 스크롤을 끄면 WrapPanel이 폭 제한을 받아 탭이 많아도 여러 줄로 감김(전체화면 버튼 밑으로 안 들어감)
         ScrollViewer.SetHorizontalScrollBarVisibility(classStrip, ScrollBarVisibility.Disabled);
         var classLeft = new DockPanel();
@@ -1232,7 +1285,7 @@ public class MainWindow : Window
             bool has = CurClass() is { Length: > 0 } c && c != "＋";
             toolbar.IsEnabled = has;
             gridHost.IsEnabled = has;
-            genBtn.IsEnabled = has && genBtn.IsEnabled;
+            genBtn.IsEnabled = has && !generating;
             cornerBox.IsVisible = has;
             if (!has) sheetMsg.Text = "시트가 없습니다 — 학급 탭의 ＋ 를 눌러 시트를 만들면 표와 버튼이 켜집니다.";
         };
