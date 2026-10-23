@@ -216,6 +216,15 @@ public class MainWindow : Window
         return await tcs.Task;
     }
 
+    /// <summary>표를 엑셀이 알아보는 TSV 로 — 탭·줄바꿈·따옴표가 든 칸은 큰따옴표로 감싸고 안의 "는 "" 로.
+    /// (ParseClipboardTable 의 반대 방향)</summary>
+    internal static string ToClipboardTable(IEnumerable<IEnumerable<string>> rows) =>
+        string.Join("\r\n", rows.Select(r => string.Join("\t", r.Select(c =>
+        {
+            c ??= "";
+            return c.IndexOfAny(new[] { '\t', '\n', '\r', '"' }) >= 0 ? "\"" + c.Replace("\"", "\"\"") + "\"" : c;
+        }))));
+
     /// <summary>엑셀·스프레드시트에서 복사한 표(TSV) 파싱 — 칸은 탭, 행은 줄바꿈으로 나누되
     /// 큰따옴표로 감싼 칸 안의 줄바꿈·탭은 내용으로 본다(엑셀이 그렇게 복사한다. "" = 따옴표 한 개).
     /// 예전: 따옴표를 무시하고 줄바꿈마다 행을 나눠, 여러 줄짜리 칸 하나가 여러 행으로 흩어졌음.</summary>
@@ -418,7 +427,7 @@ public class MainWindow : Window
             HeadersVisibility = DataGridHeadersVisibility.All,   // 열 + 행 머리글(엑셀식)
             RowHeaderWidth = 34, ColumnHeaderHeight = 30,   // 헤더 NoWrap 단일 줄 → 고정 높이(코너 체크박스와 정렬)
             CanUserResizeColumns = true, CanUserSortColumns = false,
-            ClipboardCopyMode = DataGridClipboardCopyMode.IncludeHeader,   // Ctrl+C 복사
+            ClipboardCopyMode = DataGridClipboardCopyMode.None,   // Ctrl+C 는 아래에서 직접 처리(템플릿 열은 기본 복사가 빈 값)
             SelectionMode = DataGridSelectionMode.Extended,
             BorderThickness = new Thickness(1), BorderBrush = Brush.Parse("#b5b5b5"),
             HorizontalGridLinesBrush = Brush.Parse("#d9d9d9"), VerticalGridLinesBrush = Brush.Parse("#d9d9d9"),
@@ -1062,6 +1071,20 @@ public class MainWindow : Window
                 else                            // 셀 선택 → 현재 열의 선택 셀만 비우기(DataGrid는 셀 단위 선택 미지원)
                     foreach (var r in sel) SetCell(r, cc, "");
                 RefreshKeep(); e.Handled = true;
+            }
+            else if (e.Key == Avalonia.Input.Key.C && e.KeyModifiers.HasFlag(KeyModifiers.Control) && grid.SelectedItems.Count > 0)
+            {
+                // 엑셀로 가져갈 수 있게 직접 복사 — 행 번호로 고른 행은 보이는 열 전체, 셀을 고른 경우는 그 열만
+                var cb = TopLevel.GetTopLevel(grid)?.Clipboard; if (cb == null) return;
+                var sel = rows.Where(grid.SelectedItems.Contains).ToList();   // 표에 보이는 순서대로
+                int cc = grid.CurrentColumn != null ? grid.Columns.IndexOf(grid.CurrentColumn) : -1;
+                var vis = Enumerable.Range(0, grid.Columns.Count).Where(i => grid.Columns[i].IsVisible).ToList();
+                var table = selByRowHeader || cc < 0
+                    ? sel.Select(r => vis.Select(i => GetCell(r, i)))
+                    : sel.Select(r => new[] { GetCell(r, cc) }.AsEnumerable());
+                await cb.SetTextAsync(ToClipboardTable(table));
+                sheetMsg.Text = $"{sel.Count}행 복사했습니다(엑셀에 붙여넣기 가능).";
+                e.Handled = true;
             }
             else if (e.Key == Avalonia.Input.Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Control))
             {
