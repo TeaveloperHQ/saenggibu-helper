@@ -216,6 +216,39 @@ public class MainWindow : Window
         return await tcs.Task;
     }
 
+    /// <summary>엑셀·스프레드시트에서 복사한 표(TSV) 파싱 — 칸은 탭, 행은 줄바꿈으로 나누되
+    /// 큰따옴표로 감싼 칸 안의 줄바꿈·탭은 내용으로 본다(엑셀이 그렇게 복사한다. "" = 따옴표 한 개).
+    /// 예전: 따옴표를 무시하고 줄바꿈마다 행을 나눠, 여러 줄짜리 칸 하나가 여러 행으로 흩어졌음.</summary>
+    internal static List<List<string>> ParseClipboardTable(string text)
+    {
+        var table = new List<List<string>>();
+        var row = new List<string>();
+        var cell = new System.Text.StringBuilder();
+        bool quoted = false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (quoted)
+            {
+                if (c != '"') { cell.Append(c); continue; }
+                if (i + 1 < text.Length && text[i + 1] == '"') { cell.Append('"'); i++; }   // "" → "
+                else quoted = false;
+                continue;
+            }
+            if (c == '"' && cell.Length == 0) { quoted = true; }                            // 칸 맨 앞의 따옴표만 묶음 시작
+            else if (c == '\t') { row.Add(cell.ToString()); cell.Clear(); }
+            else if (c is '\r' or '\n')
+            {
+                if (c == '\r' && i + 1 < text.Length && text[i + 1] == '\n') i++;           // CRLF 는 한 번만
+                row.Add(cell.ToString()); cell.Clear();
+                table.Add(row); row = new List<string>();
+            }
+            else cell.Append(c);
+        }
+        if (cell.Length > 0 || row.Count > 0) { row.Add(cell.ToString()); table.Add(row); }  // 마지막 줄바꿈 뒤 빈 행은 버림
+        return table;
+    }
+
     // 엑셀처럼 Alt+Enter = 칸 안에서 줄바꿈. Enter 는 그대로(셀 편집 종료 / 입력칸 줄바꿈).
     // 터널 단계에서 처리 — 그리드가 Enter 를 먼저 받아 편집을 끝내 버리지 않게.
     private static void EnableAltEnterNewline(TextBox tb) =>
@@ -1039,12 +1072,12 @@ public class MainWindow : Window
                 int startRow = selIdx.Count > 0 ? selIdx.Min() : 0;
                 int startCol = grid.CurrentColumn != null ? Math.Max(0, grid.Columns.IndexOf(grid.CurrentColumn)) : 0;
                 PushUndo();
-                var lines = txt.Replace("\r\n", "\n").Replace('\r', '\n').TrimEnd('\n').Split('\n');
-                for (int i = 0; i < lines.Length; i++)
+                var table = ParseClipboardTable(txt);
+                for (int i = 0; i < table.Count; i++)
                 {
                     int ri = startRow + i; while (ri >= rows.Count) rows.Add(new RowVm());
-                    var cells = lines[i].Split('\t');
-                    for (int j = 0; j < cells.Length; j++) { int cj = startCol + j; if (cj < grid.Columns.Count) SetCell(rows[ri], cj, cells[j]); }
+                    var cells = table[i];
+                    for (int j = 0; j < cells.Count; j++) { int cj = startCol + j; if (cj < grid.Columns.Count) SetCell(rows[ri], cj, cells[j]); }
                 }
                 RefreshKeep(); e.Handled = true;
             }
